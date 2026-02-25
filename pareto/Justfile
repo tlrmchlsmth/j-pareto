@@ -270,7 +270,12 @@ deploy CONFIG:
   with open('$MS_VALUES', 'w') as f:
       yaml.dump(overlay, f, default_flow_style=False)
   "
-  MODEL="{{MODEL}}" MS_VALUES="$MS_VALUES" helmfile apply -n "$NS"
+  DECODE_TP=$(python3 -c "import yaml; d=yaml.safe_load(open('../pareto/configs/{{CONFIG}}.yaml')); print(d.get('decode',{}).get('parallelism',{}).get('tensor',8))")
+  PREFILL_TP=$(python3 -c "import yaml; d=yaml.safe_load(open('../pareto/configs/{{CONFIG}}.yaml')); print(d.get('prefill',{}).get('parallelism',{}).get('tensor',4))")
+  if [[ "{{CONFIG}}" == disagg-* ]]; then
+    DECODE_TP="$DECODE_TP" PREFILL_TP="$PREFILL_TP" python3 scripts/gen-nic-values.py
+  fi
+  MODEL="{{MODEL}}" MS_VALUES="$MS_VALUES" DECODE_TP="$DECODE_TP" PREFILL_TP="$PREFILL_TP" helmfile apply -n "$NS"
   kubectl -n "$NS" apply -f httproute.yaml
 
 # Wait for model server pods to be ready
