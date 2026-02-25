@@ -20,9 +20,8 @@ export IMAGE := env("IMAGE", "ghcr.io/vcave/llm-d/llm-d-rocm:v0.4.7-debug")
 # Sweep configuration
 export ISL := env("ISL", "4096")
 export OSL := env("OSL", "256")
-export CONCURRENCIES := env("CONCURRENCIES", "4 8 12 16 20 24 28 32 40 48 56 64 80 96 112 128")
+
 export TARGET_DURATION := env("TARGET_DURATION", "60")
-export MIN_PROMPTS := env("MIN_PROMPTS", "100")
 export POKER_IMAGE := env("POKER_IMAGE", "quay.io/tms/poker:0.0.13")
 
 # Extra vLLM args to inject into all model server containers (space-separated)
@@ -30,6 +29,16 @@ export EXTRA_ARGS := env("EXTRA_ARGS", "")
 # Use aiter env - force user to set it.
 export VLLM_ROCM_USE_AITER := env("VLLM_ROCM_USE_AITER")
 
+# Sweep type - can be CONCURRENCY or QPS
+export SWEEP_TYPE := env("SWEEP_TYPE", "CONCURRENCY")
+export MIN_PROMPTS := env("MIN_PROMPTS", "100")
+
+# Args for SWEEP_TYPE=CONCURRENCY
+export CONCURRENCIES := env("CONCURRENCIES", "4 8 12 16 20 24 28 32 40 48 56 64 80 96 112 128")
+
+# Args for SWEEP_TYPE=QPS
+export QPS := env("QPS", "1 4 8 12 16 20 24 28 32 40 48 56 64")
+export MAX_QPS_PROMPTS := env("MAX_QPS_PROMPTS", "1024")
 
 default:
   just --list
@@ -342,7 +351,7 @@ teardown CONFIG:
 # --- Sweep ---
 
 # Launch sweep job for a config (model servers must already be running)
-sweep CONFIG:
+sweep-concurrency CONFIG:
   #!/usr/bin/env bash
   set -euo pipefail
   NS=$(just _build_ns {{CONFIG}})
@@ -365,6 +374,46 @@ sweep CONFIG:
     POKER_IMAGE="{{POKER_IMAGE}}" \
     envsubst '${JOB_NAME} ${CONFIG_NAME} ${TARGET} ${NAMESPACE} ${ISL} ${OSL} ${CONCURRENCY_LEVELS} ${TARGET_DURATION} ${MIN_PROMPTS} ${POKER_IMAGE}' \
       < job.yaml | kubectl -n "$NS" replace --force -f -
+
+sweep-qps CONFIG:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  NS=$(just _build_ns {{CONFIG}})
+  if [[ "{{CONFIG}}" == disagg-* ]]; then
+    TARGET=disagg
+  else
+    TARGET=agg
+  fi
+  echo "Launching sweep job for {{CONFIG}} in namespace $NS"
+  env \
+    JOB_NAME="pareto-{{CONFIG}}" \
+    CONFIG_NAME="{{CONFIG}}" \
+    TARGET="$TARGET" \
+    NAMESPACE="$NS" \
+    ISL={{ISL}} \
+    OSL={{OSL}} \
+    TARGET_DURATION={{TARGET_DURATION}} \
+    MIN_PROMPTS={{MIN_PROMPTS}} \
+    POKER_IMAGE="{{POKER_IMAGE}}" \
+    REQUEST_RATES="{{QPS}}" \
+    MAX_QPS_PROMPTS="{{MAX_QPS_PROMPTS}}" \
+    envsubst '${JOB_NAME} ${CONFIG_NAME} ${TARGET} ${NAMESPACE} ${ISL} ${OSL} ${TARGET_DURATION} ${MIN_PROMPTS} ${POKER_IMAGE} ${REQUEST_RATES} ${MAX_QPS_PROMPTS} ' \
+      < job_qps.yaml | kubectl -n "$NS" replace --force -f -
+
+sweep CONFIG:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  
+  if [ "$SWEEP_TYPE" == "CONCURRENCY" ]; then
+    echo "Routing to Concurrency Sweep..."
+    just sweep-concurrency "{{CONFIG}}"
+  elif [ "$SWEEP_TYPE" == "QPS" ]; then
+    echo "Routing to QPS Sweep..."
+    just sweep-qps "{{CONFIG}}"
+  else
+    echo "ERROR: Unknown SWEEP_TYPE '$TYPE'. Use 'CONCURRENCY' or 'QPS'."
+    exit 1
+  fi
 
 # Wait for a config's sweep job to complete
 wait-sweep CONFIG:

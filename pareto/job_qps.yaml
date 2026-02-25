@@ -1,0 +1,129 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: ${JOB_NAME}
+  labels:
+    app: pareto
+    pareto/config: ${CONFIG_NAME}
+spec:
+  backoffLimit: 2
+  ttlSecondsAfterFinished: 86400
+  template:
+    metadata:
+      labels:
+        app: pareto
+        pareto/config: ${CONFIG_NAME}
+    spec:
+      serviceAccountName: poker
+      restartPolicy: Never
+      tolerations:
+        - key: "amd.com/gpu"
+          operator: "Exists"
+          effect: "NoSchedule"
+        - key: "nvidia.com/gpu"
+          operator: "Exists"
+          effect: "NoSchedule"
+      containers:
+        - name: bench
+          image: ${POKER_IMAGE}
+          imagePullPolicy: Always
+          command: ["/bin/bash", "-c"]
+          args:
+            - |
+              set -euo pipefail
+
+              # Activate venv and install vllm benchmark client
+              source /app/.venv/bin/activate
+              echo "Installing vllm..."
+              uv pip install vllm
+
+              # CONFIG_NAME is the human-readable config identifier (e.g. agg-tp8)
+              # TARGET is the llm-d guide name (agg or disagg) used for
+              # gateway URL construction and GPU detection via pod labels.
+              CONFIG_NAME="${CONFIG_NAME}"
+              TARGET="${TARGET}"
+              NAMESPACE="${NAMESPACE}"
+              ISL=${ISL}
+              OSL=${OSL}
+              REQUEST_RATES="${REQUEST_RATES}"
+              TARGET_DURATION=${TARGET_DURATION}
+              MIN_PROMPTS=${MIN_PROMPTS}
+              MAX_QPS_PROMPTS=${QPS_PROMPTS}
+
+              # Build gateway URL
+              URL="http://infra-${TARGET}-inference-gateway-istio.${NAMESPACE}.svc.cluster.local"
+
+              # Detect model
+              echo "Detecting model from $CONFIG_NAME (guide=$TARGET)..."
+              MAX_WAIT=300
+              ELAPSED=0
+              MODEL=""
+              while [ -z "$MODEL" ] || [ "$MODEL" = "null" ]; do
+                RESP=$(curl -s "$URL/v1/models" 2>/dev/null || true)
+                MODEL=$(echo "$RESP" | jq -r '.data[0].id' 2>/dev/null || true)
+                if [ -n "$MODEL" ] && [ "$MODEL" != "null" ]; then
+                  break
+                fi
+                sleep 5
+                ELAPSED=$((ELAPSED + 5))
+                if [ $ELAPSED -ge $MAX_WAIT ]; then
+                  echo "ERROR: Could not detect model from $CONFIG_NAME after ${MAX_WAIT}s"
+                  exit 1
+                fi
+                if [ $((ELAPSED % 30)) -eq 0 ]; then
+                  echo "  waiting for gateway... ${ELAPSED}s"
+                fi
+              done
+              echo "Model: $MODEL"
+
+              # Detect GPU count
+              GPU_COUNT=$(kubectl get pods -n "$NAMESPACE" \
+                -l "llm-d.ai/guide=${TARGET},llm-d.ai/inference-serving=true" \
+                -o json | jq '[.items[].spec.containers[].resources.limits | (.["nvidia.com/gpu"] // .["amd.com/gpu"] // empty) | tonumber] | add')
+              if [ -z "$GPU_COUNT" ] || [ "$GPU_COUNT" = "null" ]; then
+                echo "WARNING: Could not detect GPU count for $CONFIG_NAME, defaulting to 0"
+                GPU_COUNT=0
+              fi
+              echo "GPU count: $GPU_COUNT"
+
+              echo "SWEEP_START"
+              echo "CONFIG: target=$CONFIG_NAME model=$MODEL isl=$ISL osl=$OSL gpu_count=$GPU_COUNT"
+              echo "TARGET_DURATION: ${TARGET_DURATION}s  MIN_PROMPTS: ${MIN_PROMPTS}"
+              echo "REQUEST_RATES: $REQUEST_RATES"
+
+              for RR in $REQUEST_RATES; do
+
+                # Just make sure all requests are submitted by TARGET_DURATION
+                NP=$(python3 -c "import math; r=float('$RR'); print(max($MIN_PROMPTS, min(math.ceil(r * $TARGET_DURATION), MAX_QPS_PROMPTS)))")
+
+                # Main benchmark run
+                echo "BENCH_RUN: request_rate=$RR num_prompts=$NP"
+                vllm bench serve \
+                  --base-url "$URL" \
+                  --model "$MODEL" \
+                  --dataset-name random \
+                  --random-input-len $ISL \
+                  --random-output-len $OSL \
+                  --num-prompts $NP \
+                  --ignore-eos \
+                  --request-rate $RR \
+                  --seed $(date +%M%H%M%S)
+                echo "BENCH_RUN_END: request_rate=$RR"
+              done
+
+              echo ""
+              echo "SWEEP_END"
+          env:
+            - name: HF_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: hf-secret
+                  key: HF_TOKEN
+                  optional: true
+          resources:
+            requests:
+              cpu: "2"
+              memory: 4Gi
+            limits:
+              cpu: "4"
+              memory: 8Gi
