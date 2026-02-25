@@ -14,6 +14,8 @@ export MAX_GPUS := env("MAX_GPUS", "32")
 
 # Model to deploy
 export MODEL := env("MODEL", "openai/gpt-oss-120b")
+# vllm image to use
+export IMAGE := env("IMAGE", "ghcr.io/vcave/llm-d/llm-d-rocm:v0.4.7-debug")
 
 # Sweep configuration
 export ISL := env("ISL", "4096")
@@ -21,10 +23,12 @@ export OSL := env("OSL", "256")
 export CONCURRENCIES := env("CONCURRENCIES", "4 8 12 16 20 24 28 32 40 48 56 64 80 96 112 128")
 export TARGET_DURATION := env("TARGET_DURATION", "60")
 export MIN_PROMPTS := env("MIN_PROMPTS", "100")
-export IMAGE := env("IMAGE", "quay.io/tms/poker:0.0.13")
+export POKER_IMAGE := env("POKER_IMAGE", "quay.io/tms/poker:0.0.13")
 
 # Extra vLLM args to inject into all model server containers (space-separated)
 export EXTRA_ARGS := env("EXTRA_ARGS", "")
+# Use aiter env - force user to set it.
+export VLLM_ROCM_USE_AITER := env("VLLM_ROCM_USE_AITER")
 
 
 default:
@@ -254,6 +258,8 @@ deploy CONFIG:
   overlay.pop('expert_parallel', None)
   extra_args = shlex.split('{{EXTRA_ARGS}}')
   ep = '$IS_EP' == 'yes'
+  image_override = '{{IMAGE}}'
+  aiter_override = '{{VLLM_ROCM_USE_AITER}}'
   if ep or extra_args:
       with open('ms/values.yaml') as f:
           base = yaml.safe_load(f)
@@ -261,11 +267,31 @@ deploy CONFIG:
           base_role = base.get(role, {})
           if base_role.get('containers') or base_role.get('create', False):
               containers = copy.deepcopy(base_role.get('containers', [{}]))
+              # 1. set args
               args = list(containers[0].get('args', []))
               if ep:
                   args.append('--enable-expert-parallel')
               args.extend(extra_args)
               containers[0]['args'] = args
+
+              # 2. Inject Image
+              if image_override:
+                  containers[0]['image'] = image_override
+
+              # 3. Inject AITER Env Var
+              if aiter_override:
+                  env_vars = containers[0].get('env', [])
+                  found = False
+                  for env in env_vars:
+                      if env.get('name') == 'VLLM_ROCM_USE_AITER':
+                          env['value'] = str(aiter_override)
+                          found = True
+                          break
+                  # If it wasn't in the base values file, append it cleanly
+                  if not found:
+                      env_vars.append({'name': 'VLLM_ROCM_USE_AITER', 'value': str(aiter_override)})
+                  containers[0]['env'] = env_vars
+
               overlay.setdefault(role, {})['containers'] = containers
   with open('$MS_VALUES', 'w') as f:
       yaml.dump(overlay, f, default_flow_style=False)
@@ -336,8 +362,8 @@ sweep CONFIG:
     CONCURRENCY_LEVELS="{{CONCURRENCIES}}" \
     TARGET_DURATION={{TARGET_DURATION}} \
     MIN_PROMPTS={{MIN_PROMPTS}} \
-    IMAGE="{{IMAGE}}" \
-    envsubst '${JOB_NAME} ${CONFIG_NAME} ${TARGET} ${NAMESPACE} ${ISL} ${OSL} ${CONCURRENCY_LEVELS} ${TARGET_DURATION} ${MIN_PROMPTS} ${IMAGE}' \
+    POKER_IMAGE="{{POKER_IMAGE}}" \
+    envsubst '${JOB_NAME} ${CONFIG_NAME} ${TARGET} ${NAMESPACE} ${ISL} ${OSL} ${CONCURRENCY_LEVELS} ${TARGET_DURATION} ${MIN_PROMPTS} ${POKER_IMAGE}' \
       < job.yaml | kubectl -n "$NS" replace --force -f -
 
 # Wait for a config's sweep job to complete
