@@ -1,126 +1,252 @@
-BASE_URL := "${BASE_URL}"
 NAMESPACE := "${NAMESPACE}"
 
-# Use this Justfile within the cluster.
+# Sweep configuration
+TARGET_DURATION := "300"
+MIN_PROMPTS := "200"
+
+# Gateway URL convention: infra-{TARGET}-inference-gateway-istio.{NAMESPACE}.svc.cluster.local
+_url TARGET:
+  @echo "http://infra-{{TARGET}}-inference-gateway-istio.{{NAMESPACE}}.svc.cluster.local"
 
 default:
   just --list
 
-# Detect model from vLLM endpoint
-@_model:
+# --- Discovery & Health ---
+
+# List available inference gateways in the namespace
+list:
   #!/usr/bin/env bash
-  RESP=$(curl -s {{BASE_URL}}/v1/models)
+  kubectl get gateways -n {{NAMESPACE}} -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}' \
+    | sed 's/^infra-//; s/-inference-gateway$//'
+
+# Check if a deployment is serving
+health TARGET:
+  #!/usr/bin/env bash
+  URL=$(just _url {{TARGET}})
+  echo "=== {{TARGET}} ==="
+  curl -s "$URL/v1/models" | jq -r '.data[].id' 2>/dev/null || echo "  not ready"
+
+# Check all deployments
+health-all:
+  #!/usr/bin/env bash
+  for GW in $(just list); do
+    just health "$GW"
+    echo ""
+  done
+
+# --- Helpers (internal) ---
+
+@_model TARGET:
+  #!/usr/bin/env bash
+  URL=$(just _url {{TARGET}})
+  RESP=$(curl -s "$URL/v1/models")
   MODEL=$(echo "$RESP" | jq -r '.data[0].id' 2>/dev/null)
   if [[ -z "$MODEL" || "$MODEL" == "null" ]]; then
-    echo "ERROR: Could not detect model. Response: $RESP" >&2
+    echo "ERROR: Could not detect model from {{TARGET}}. Response: $RESP" >&2
     exit 1
   fi
   echo "$MODEL"
 
-eval:
-    .lm_eval/bin/lm_eval --model local-completions --tasks gsm8k \
-    --model_args model=$(just _model),base_url={{BASE_URL}}/v1/completions,num_concurrent=2000,max_retries=3,tokenized_requests=False \
-    --num_fewshot 10 \
+# --- Benchmarking ---
 
-benchmark MC NUM_REQUESTS INPUT_LEN OUTPUT_LEN:
-    vllm bench serve \
-        --base-url {{BASE_URL}} \
-        --model $(just _model) \
-        --dataset-name random \
-        --random-input-len {{INPUT_LEN}} \
-        --random-output-len {{OUTPUT_LEN}}  \
-        --max-concurrency {{MC}} \
-        --request-rate 4096 \
-        --seed $(date +%M%H%M%S) \
-        --num-prompts {{NUM_REQUESTS}} \
-        --ignore-eos
+# Benchmark a deployment: just benchmark <target> <concurrency> <num_requests> <isl> <osl>
+benchmark TARGET MC NUM_REQUESTS INPUT_LEN OUTPUT_LEN:
+  vllm bench serve \
+    --base-url $(just _url {{TARGET}}) \
+    --model $(just _model {{TARGET}}) \
+    --dataset-name random \
+    --random-input-len {{INPUT_LEN}} \
+    --random-output-len {{OUTPUT_LEN}} \
+    --max-concurrency {{MC}} \
+    --request-rate 4096 \
+    --seed $(date +%M%H%M%S) \
+    --num-prompts {{NUM_REQUESTS}} \
+    --ignore-eos
 
-# Run N waves of X concurrent requests (wraps `benchmark`)
-# Usage: just run-benchmark N X INPUT_LEN OUTPUT_LEN
-# Optional: set OUTFILE=/path/to/log to control the log destination.
-benchmark-a N X INPUT_LEN OUTPUT_LEN:
-    N_X=$(( {{N}} * {{X}} ))
-    outfile="${OUTFILE:-run_benchmark_{{N}}x{{X}}_$(date +%Y%m%d_%H%M%S).log}"
-    just benchmark "{{X}}" "$N_X" "{{INPUT_LEN}}" "{{OUTPUT_LEN}}" |& tee "$outfile"
-
-benchmark_g MC NUM_REQUESTS INPUT_LEN OUTPUT_LEN:
+# Benchmark with guidellm
+benchmark_g TARGET MC NUM_REQUESTS INPUT_LEN OUTPUT_LEN:
   GUIDELLM__REQUEST_TIMEOUT="900" \
   GUIDELLM__MAX_CONCURRENCY="{{MC}}" \
     guidellm benchmark \
-      --target {{BASE_URL}} \
+      --target $(just _url {{TARGET}}) \
       --rate-type constant \
       --rate 2048 \
       --max-requests {{NUM_REQUESTS}} \
       --data '{"prompt_tokens": {{INPUT_LEN}}, "output_tokens": {{OUTPUT_LEN}}}'
 
-# Simulates a pure decode workload, for measuring output token throughput and TTFT.
-# Designed to approximate the decode side of a P/D deployment in a steady state.
-benchmark_decode_workload NUM_REQUESTS OUTPUT_LEN:
-    vllm bench serve \
-        --base-url {{BASE_URL}} \
-        --model $(just _model) \
-        --dataset-name random \
-        --random-input-len 1 \
-        --random-output-len {{OUTPUT_LEN}}  \
-        --seed $(date +%M%H%M%S) \
-        --num-prompts {{NUM_REQUESTS}} \
-        --ignore-eos
+# Pure decode workload (ISL=1)
+benchmark_decode_workload TARGET NUM_REQUESTS OUTPUT_LEN:
+  vllm bench serve \
+    --base-url $(just _url {{TARGET}}) \
+    --model $(just _model {{TARGET}}) \
+    --dataset-name random \
+    --random-input-len 1 \
+    --random-output-len {{OUTPUT_LEN}} \
+    --seed $(date +%M%H%M%S) \
+    --num-prompts {{NUM_REQUESTS}} \
+    --ignore-eos
 
-# For hitting an individual vLLM instance while deploying a P/D setup
+# --- GPU Count Detection ---
+
+# Get total GPU count for a target deployment
+_gpu_count TARGET:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  COUNT=$(kubectl get pods -n {{NAMESPACE}} \
+    -l "llm-d.ai/guide={{TARGET}},llm-d.ai/inference-serving=true" \
+    -o json | jq '[.items[].spec.containers[].resources.limits | (.["nvidia.com/gpu"] // .["amd.com/gpu"] // empty) | tonumber] | add')
+  if [[ -z "$COUNT" || "$COUNT" == "null" ]]; then
+    echo "ERROR: Could not detect GPU count for {{TARGET}}" >&2
+    exit 1
+  fi
+  echo "$COUNT"
+
+# --- Pareto Frontier Sweep ---
+
+# Sweep concurrency levels: just sweep <target> <isl> <osl> <concurrency levels...>
+# Example: just sweep agg 4096 512 1 4 8 16 32 64
+sweep TARGET ISL OSL +CONCURRENCIES:
+  #!/usr/bin/env bash
+  set -euo pipefail
+
+  URL=$(just _url {{TARGET}})
+  MODEL=$(just _model {{TARGET}})
+  GPU_COUNT=$(just _gpu_count {{TARGET}})
+  TARGET_DURATION={{TARGET_DURATION}}
+  MIN_PROMPTS={{MIN_PROMPTS}}
+
+  echo "SWEEP_START"
+  echo "CONFIG: target={{TARGET}} model=$MODEL isl={{ISL}} osl={{OSL}} gpu_count=$GPU_COUNT"
+  echo "TARGET_DURATION: ${TARGET_DURATION}s  MIN_PROMPTS: ${MIN_PROMPTS}"
+  echo "CONCURRENCY_LEVELS: {{CONCURRENCIES}}"
+
+  for MC in {{CONCURRENCIES}}; do
+    echo ""
+
+    # Calibration: small run to estimate throughput
+    CALIB_N=$((MC > 20 ? MC : 20))
+    echo "CALIBRATION: concurrency=$MC num_prompts=$CALIB_N"
+    CALIB_OUTPUT=$(vllm bench serve \
+      --base-url "$URL" \
+      --model "$MODEL" \
+      --dataset-name random \
+      --random-input-len {{ISL}} \
+      --random-output-len {{OSL}} \
+      --max-concurrency $MC \
+      --num-prompts $CALIB_N \
+      --ignore-eos \
+      --request-rate 4096 \
+      --seed $(date +%M%H%M%S) 2>&1)
+    echo "$CALIB_OUTPUT"
+
+    # Compute num_prompts for target duration
+    THROUGHPUT=$(echo "$CALIB_OUTPUT" | grep -i "Total Token throughput" | grep -oE '[0-9]+\.[0-9]+' | tail -1)
+    TOKENS_PER_REQ=$(({{ISL}} + {{OSL}}))
+    if [ -n "${THROUGHPUT:-}" ]; then
+      NP=$(python3 -c "import math; r=float('$THROUGHPUT')/$TOKENS_PER_REQ; print(max($MIN_PROMPTS, math.ceil(r * $TARGET_DURATION)))")
+    else
+      NP=$MIN_PROMPTS
+    fi
+    echo "COMPUTED_NUM_PROMPTS: $NP (throughput=${THROUGHPUT:-n/a} tok/s)"
+
+    # Main benchmark run
+    echo "BENCH_RUN: concurrency=$MC num_prompts=$NP"
+    vllm bench serve \
+      --base-url "$URL" \
+      --model "$MODEL" \
+      --dataset-name random \
+      --random-input-len {{ISL}} \
+      --random-output-len {{OSL}} \
+      --max-concurrency $MC \
+      --num-prompts $NP \
+      --ignore-eos \
+      --request-rate 4096 \
+      --seed $(date +%M%H%M%S)
+    echo "BENCH_RUN_END: concurrency=$MC"
+  done
+
+  echo ""
+  echo "SWEEP_END"
+
+# Sweep all discovered targets: just sweep-all <isl> <osl> <concurrency levels...>
+# Example: just sweep-all 4096 512 1 4 8 16 32 64
+sweep-all ISL OSL +CONCURRENCIES:
+  #!/usr/bin/env bash
+  set -euo pipefail
+
+  TARGETS=$(just list)
+  if [[ -z "$TARGETS" ]]; then
+    echo "ERROR: No inference gateways found in namespace" >&2
+    exit 1
+  fi
+
+  echo "Discovered targets: $TARGETS"
+  mkdir -p /app/results
+
+  for TARGET in $TARGETS; do
+    echo ""
+    echo "=========================================="
+    echo "Sweeping target: $TARGET"
+    echo "=========================================="
+    just sweep "$TARGET" {{ISL}} {{OSL}} {{CONCURRENCIES}} 2>&1 | tee "/app/results/${TARGET}.log"
+  done
+
+  echo ""
+  echo "All sweeps complete. Results in /app/results/"
+  ls -la /app/results/
+
+# --- Eval ---
+
+# Run lm_eval against a deployment
+eval TARGET:
+  .lm_eval/bin/lm_eval --model local-completions --tasks gsm8k \
+    --model_args model=$(just _model {{TARGET}}),base_url=$(just _url {{TARGET}})/v1/completions,num_concurrent=2000,max_retries=3,tokenized_requests=False \
+    --num_fewshot 10
+
+# --- Direct pod access (bypasses gateway) ---
+
+# Hit an individual vLLM pod directly
 benchmark_no_pd POD_IP RR NUM_REQUESTS INPUT_LEN OUTPUT_LEN:
-    vllm bench serve \
-        --base-url http://{{POD_IP}}:8000 \
-        --model $(just _model) \
-        --dataset-name random \
-        --random-input-len {{INPUT_LEN}} \
-        --random-output-len {{OUTPUT_LEN}}  \
-        --request-rate {{RR}} \
-        --seed $(date +%M%H%M%S) \
-        --num-prompts {{NUM_REQUESTS}} \
-        --ignore-eos
+  vllm bench serve \
+    --base-url http://{{POD_IP}}:8000 \
+    --model $(curl -s http://{{POD_IP}}:8000/v1/models | jq -r '.data[0].id') \
+    --dataset-name random \
+    --random-input-len {{INPUT_LEN}} \
+    --random-output-len {{OUTPUT_LEN}} \
+    --request-rate {{RR}} \
+    --seed $(date +%M%H%M%S) \
+    --num-prompts {{NUM_REQUESTS}} \
+    --ignore-eos
 
-# For vLLM PyTorch traces.
-# vLLM serve must be run with the VLLM_TORCH_PROFILER_DIR env set.
+# --- Profiling ---
+
 start_profile URL:
   curl -X POST {{URL}}/start_profile
 stop_profile URL:
   curl -X POST {{URL}}/stop_profile
 profile URL:
-  just start_profile {{URL}} \
-  && sleep 1 \
-  && just stop_profile {{URL}}
+  just start_profile {{URL}} && sleep 1 && just stop_profile {{URL}}
 
-# Profile all decode pods (detected at runtime via kubectl)
+# Profile all decode pods in the namespace
 profile_all_decode:
   #!/usr/bin/env bash
   set -euo pipefail
-
   echo "Detecting decode pods..."
   DECODE_IPS=$(kubectl get pods -n {{NAMESPACE}} -o json | jq -r '.items[] | select(.metadata.name | contains("decode")) | .status.podIP' | tr '\n' ' ')
-
   if [[ -z "$DECODE_IPS" ]]; then
     echo "No decode pods found in namespace {{NAMESPACE}}"
     exit 1
   fi
-
   echo "Decode pod IPs: $DECODE_IPS"
-  echo "Starting profile on all decode pods asynchronously..."
-
+  echo "Starting profile on all decode pods..."
   for IP in $DECODE_IPS; do
-    echo "  Starting profile on $IP..."
     curl -s -X POST http://$IP:8200/start_profile &
   done
   wait
-
-  echo "All decode pods started profiling"
-  echo "Sleeping for 1 second..."
   sleep 1
-
-  echo "Stopping profile on all decode pods asynchronously..."
+  echo "Stopping profile on all decode pods..."
   for IP in $DECODE_IPS; do
-    echo "  Stopping profile on $IP..."
     curl -s -X POST http://$IP:8200/stop_profile &
   done
   wait
-
-  echo "Profiling complete on all decode pods!"
+  echo "Profiling complete!"

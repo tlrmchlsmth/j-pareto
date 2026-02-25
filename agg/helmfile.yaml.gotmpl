@@ -11,8 +11,8 @@ environments:
 ---
 
 {{- $ns := .Namespace | default "tms" -}}
-{{- $rn := (env "RELEASE_NAME_POSTFIX") | default "glm-disagg" -}}
-{{- $model := env "MODEL" | default "zai-org/GLM-4.7-FP8" -}}
+{{- $rn := (env "RELEASE_NAME_POSTFIX") | default "agg" -}}
+{{- $model := env "MODEL" | default "openai/gpt-oss-120b" -}}
 {{- $msValues := env "MS_VALUES" -}}
 
 repositories:
@@ -71,10 +71,6 @@ releases:
       - ms/values.yaml
     {{- if $msValues }}
       - {{ $msValues }}
-    {{- end }}
-    {{- if or (eq .Environment.Name "istio") (eq .Environment.Name "default") }}
-      - routing:
-          {{ .Environment.Values.routing | toYaml | nindent 10 }}
     {{- end }}
     set:
       - name: modelArtifacts.uri

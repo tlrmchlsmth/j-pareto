@@ -5,11 +5,7 @@ NAMESPACE := "tms"
 HF_TOKEN := "$HF_TOKEN"
 GH_TOKEN := "$GH_TOKEN"
 
-
 KN := "kubectl -n " + NAMESPACE
-
-EXAMPLE_DIR := "llm-d/guides/wide-ep-lws"
-GATEWAY_DIR := "llm-d/guides/recipes/gateway"
 
 default:
   just --list
@@ -62,57 +58,6 @@ get-decode-pods:
   {{KN}} get pods -o json | jq -r '.items[] | select(.metadata.name | contains("decode")) | "\(.metadata.name) \(.status.podIP)"' > .tmp/decode_pods.txt
   echo "Decode pods:"
   cat .tmp/decode_pods.txt
-
-poke:
-  #!/usr/bin/env bash
-  set -euo pipefail
-  mkdir -p ./.tmp
-
-  # Export variables for envsubst
-  export BASE_URL="http://llm-d-inference-gateway-istio.{{NAMESPACE}}.svc.cluster.local"
-  export NAMESPACE="{{NAMESPACE}}"
-
-  envsubst '${BASE_URL} ${NAMESPACE}' < Justfile.remote > .tmp/Justfile.remote.tmp
-  kubectl cp .tmp/Justfile.remote.tmp {{NAMESPACE}}/poker:/app/Justfile
-  {{KN}} exec -it poker -- /bin/zsh
-
-
-parallel-guidellm CONCURRENT_PER_WORKER='4000' REQUESTS_PER_WORKER='4000' INPUT_LEN='128' OUTPUT_LEN='1000' N_WORKERS='4':
-  {{KN}} delete job parallel-guidellm --ignore-not-found=true \
-  && env \
-    N_WORKERS={{N_WORKERS}} \
-    MAX_CONCURRENCY={{CONCURRENT_PER_WORKER}} \
-    NUM_REQUESTS={{REQUESTS_PER_WORKER}} \
-    INPUT_LEN={{INPUT_LEN}} \
-    OUTPUT_LEN={{OUTPUT_LEN}} \
-    OUTPUT_PATH="parallel-guidellm-$(date +%Y%m%d-%H%M%S)" \
-    envsubst '${N_WORKERS} ${MAX_CONCURRENCY} ${NUM_REQUESTS} ${INPUT_LEN} ${OUTPUT_LEN} ${OUTPUT_PATH}' \
-      < parallel-guidellm.yaml | kubectl apply -f -
-
-deploy_inferencepool:
-  cd {{EXAMPLE_DIR}} && \
-  helm install llm-d-infpool \
-    -n {{NAMESPACE}} \
-    -f manifests/inferencepool.values.yaml \
-    --set "provider.name=istio" \
-    --set "inferenceExtension.monitoring.prometheus.enabled=true" \
-    oci://registry.k8s.io/gateway-api-inference-extension/charts/inferencepool --version v1.2.0
-
-start:
-  cd {{EXAMPLE_DIR}} \
-  && {{KN}} apply -k ./manifests/modelserver/coreweave \
-  && just deploy_inferencepool \
-  && {{KN}} apply -k ../../recipes/gateway/istio
-
-stop:
-  cd {{EXAMPLE_DIR}} \
-  && helm uninstall llm-d-infpool -n {{NAMESPACE}} --ignore-not-found=true \
-  && {{KN}} delete -k ./manifests/modelserver/coreweave --ignore-not-found=true \
-  && {{KN}} delete -k ../../recipes/gateway/istio --ignore-not-found=true \
-  && {{KN}} delete job parallel-guidellm --ignore-not-found=true
-
-restart:
-  just stop && just start
 
 # Copy PyTorch traces from all decode pods to local ./traces/N directory
 copy-traces:

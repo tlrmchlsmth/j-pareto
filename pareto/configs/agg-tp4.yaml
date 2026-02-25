@@ -1,0 +1,7 @@
+# 4 GPU aggregated: TP=4, 1 replica
+# Base: agg
+expert_parallel: false
+decode:
+  parallelism:
+    tensor: 4
+  replicas: 1

@@ -6,7 +6,6 @@ KN := "kubectl -n " + NAMESPACE
 
 # Benchmark configuration
 MODEL := "openai/gpt-oss-120b"
-#MODEL := "zai-org/GLM-4.7-FP8"
 IMAGE := "ghcr.io/vcave/llm-d/llm-d-rocm:v0.4.7-debug"
 GPU_MEM_UTIL := "0.95"
 TARGET_DURATION := "60"

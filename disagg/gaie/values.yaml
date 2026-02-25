@@ -44,7 +44,7 @@ inferenceExtension:
   monitoring:
     interval: "10s"
     secret:
-      name: glm-disagg-gateway-sa-metrics-reader-secret
+      name: disagg-gateway-sa-metrics-reader-secret
     prometheus:
       enabled: true
       auth:
@@ -57,4 +57,4 @@ inferencePool:
   modelServers:
     matchLabels:
       llm-d.ai/inference-serving: "true"
-      llm-d.ai/guide: "glm-disagg"
+      llm-d.ai/guide: "disagg"

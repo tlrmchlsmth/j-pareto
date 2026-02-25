@@ -3,7 +3,7 @@ set dotenv-path := "../.env"
 
 NAMESPACE := "tms"
 KN := "kubectl -n " + NAMESPACE
-MODEL := "zai-org/GLM-4.7-FP8"
+MODEL := "openai/gpt-oss-120b"
 
 default:
   just --list
@@ -19,15 +19,15 @@ deploy-gw ENV:
 
 # Show pod status
 status:
-  {{KN}} get pods -l llm-d.ai/guide=glm-disagg
+  {{KN}} get pods -l llm-d.ai/guide=disagg
 
 # Show all resources
 status-all:
-  {{KN}} get all -l llm-d.ai/guide=glm-disagg
+  {{KN}} get all -l llm-d.ai/guide=disagg
 
 # Show helm releases
 releases:
-  helm list -n {{NAMESPACE}} | grep glm-disagg
+  helm list -n {{NAMESPACE}} | grep disagg
 
 # Tear down the deployment
 destroy:
@@ -36,20 +36,20 @@ destroy:
 
 # Get gateway IP
 gateway-ip:
-  {{KN}} get gateway/infra-glm-disagg-inference-gateway -o jsonpath='{.status.addresses[0].value}'
+  {{KN}} get gateway/infra-disagg-inference-gateway -o jsonpath='{.status.addresses[0].value}'
 
 # Deploy the poker pod for interactive benchmarking
 start-poker:
-  {{KN}} apply -f ../poker.yaml
+  {{KN}} apply -f ../poker/poker.yaml
 
-# Open a shell in the poker pod with Justfile.remote for both gateways
+# Open a shell in the poker pod with Justfile.remote
 poke:
   #!/usr/bin/env bash
   set -euo pipefail
   mkdir -p ../.tmp
   export NAMESPACE="{{NAMESPACE}}"
-  envsubst '${NAMESPACE}' < ../Justfile.glm-remote > ../.tmp/Justfile.glm-remote.tmp
-  kubectl cp ../.tmp/Justfile.glm-remote.tmp {{NAMESPACE}}/poker:/app/Justfile
+  envsubst '${NAMESPACE}' < ../Justfile.remote > ../.tmp/Justfile.remote.tmp
+  kubectl cp ../.tmp/Justfile.remote.tmp {{NAMESPACE}}/poker:/app/Justfile
   {{KN}} exec -it poker -- /bin/zsh
 
 # Copy sweep results from poker pod to local ../results/
@@ -63,4 +63,4 @@ copy-results:
 
 # Generate a Google Sheet from collected results
 collect-sheets TITLE:
-  python3 ../glm-collect.py -d ../results --sheets "{{TITLE}}"
+  python3 ../collect-sweep-logs.py -d ../results --sheets "{{TITLE}}"

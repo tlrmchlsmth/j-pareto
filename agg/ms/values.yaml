@@ -6,7 +6,7 @@ modelArtifacts:
   authSecretName: "hf-secret"
   labels:
     llm-d.ai/inference-serving: "true"
-    llm-d.ai/guide: "glm-agg"
+    llm-d.ai/guide: "agg"
     llm-d.ai/accelerator-variant: "gpu"
     llm-d.ai/accelerator-vendor: "amd"
 

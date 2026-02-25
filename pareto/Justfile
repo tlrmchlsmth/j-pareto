@@ -5,7 +5,7 @@ set dotenv-path := "../.env"
 export NSP := env("NSP", env("USER", "anon"))
 
 # Configs to sweep (space-separated). Each name maps to configs/<name>.yaml.
-# Prefix determines base template: agg-* → glm-agg, disagg-* → glm-disagg.
+# Prefix determines base template: agg-* → agg, disagg-* → disagg.
 #export CONFIGS := env("CONFIGS", "disagg-3p5d-32 disagg-2p2d-24 disagg-2p1d-16 disagg-1p1d-8 agg-tp8 agg-tp4")
 export CONFIGS := env("CONFIGS", "agg-tp4 disagg-1p1d-8")
 
@@ -13,8 +13,7 @@ export CONFIGS := env("CONFIGS", "agg-tp4 disagg-1p1d-8")
 export MAX_GPUS := env("MAX_GPUS", "32")
 
 # Model to deploy
-#export MODEL := env("MODEL", "openai/gpt-oss-120b")
-export MODEL := env("MODEL", "RedHatAI/Llama-3.3-70B-Instruct-FP8-dynamic")
+export MODEL := env("MODEL", "openai/gpt-oss-120b")
 
 # Sweep configuration
 export ISL := env("ISL", "4096")
@@ -238,9 +237,9 @@ deploy CONFIG:
   set -euo pipefail
   NS=$(just _build_ns {{CONFIG}})
   if [[ "{{CONFIG}}" == disagg-* ]]; then
-    BASE=glm-disagg
+    BASE=disagg
   else
-    BASE=glm-agg
+    BASE=agg
   fi
   IS_EP=$(just _is_ep_cfg {{CONFIG}})
   # Build overlay: strip expert_parallel, inject EP flag + EXTRA_ARGS into containers
@@ -250,7 +249,7 @@ deploy CONFIG:
   cd "../$BASE"
   python3 -c "
   import yaml, shlex, copy
-  with open('../glm-pareto/configs/{{CONFIG}}.yaml') as f:
+  with open('../pareto/configs/{{CONFIG}}.yaml') as f:
       overlay = yaml.safe_load(f)
   overlay.pop('expert_parallel', None)
   extra_args = shlex.split('{{EXTRA_ARGS}}')
@@ -280,9 +279,9 @@ wait-ready CONFIG:
   set -euo pipefail
   NS=$(just _build_ns {{CONFIG}})
   if [[ "{{CONFIG}}" == disagg-* ]]; then
-    GUIDE=glm-disagg
+    GUIDE=disagg
   else
-    GUIDE=glm-agg
+    GUIDE=agg
   fi
   echo "Waiting for model servers in $NS..."
   # Wait for at least one pod to exist
@@ -300,9 +299,9 @@ teardown CONFIG:
   set -euo pipefail
   NS=$(just _build_ns {{CONFIG}})
   if [[ "{{CONFIG}}" == disagg-* ]]; then
-    BASE=glm-disagg
+    BASE=disagg
   else
-    BASE=glm-agg
+    BASE=agg
   fi
   echo "Tearing down model servers in $NS {{CONFIG}}"
   cd "../$BASE"
@@ -317,13 +316,13 @@ sweep CONFIG:
   set -euo pipefail
   NS=$(just _build_ns {{CONFIG}})
   if [[ "{{CONFIG}}" == disagg-* ]]; then
-    TARGET=glm-disagg
+    TARGET=disagg
   else
-    TARGET=glm-agg
+    TARGET=agg
   fi
   echo "Launching sweep job for {{CONFIG}} in namespace $NS"
   env \
-    JOB_NAME="glm-pareto-{{CONFIG}}" \
+    JOB_NAME="pareto-{{CONFIG}}" \
     CONFIG_NAME="{{CONFIG}}" \
     TARGET="$TARGET" \
     NAMESPACE="$NS" \
@@ -343,7 +342,7 @@ wait-sweep CONFIG:
   NS=$(just _build_ns {{CONFIG}})
   echo "Waiting for sweep job in $NS..."
   kubectl -n "$NS" wait --for=condition=complete --timeout=3h \
-    "job/glm-pareto-{{CONFIG}}" || \
+    "job/pareto-{{CONFIG}}" || \
     echo "WARNING: sweep job for {{CONFIG}} did not complete successfully"
 
 # --- Results ---
@@ -382,7 +381,7 @@ status:
   for CFG in {{CONFIGS}}; do
     NS=$(just _build_ns ${CFG})
     echo "=== $NS ==="
-    kubectl -n "$NS" get jobs -l app=glm-pareto 2>/dev/null || echo "  (namespace not found)"
+    kubectl -n "$NS" get jobs -l app=pareto 2>/dev/null || echo "  (namespace not found)"
     kubectl -n "$NS" get pods -l llm-d.ai/inference-serving=true --no-headers 2>/dev/null || true
     echo ""
   done
@@ -392,7 +391,7 @@ clean:
   #!/usr/bin/env bash
   for CFG in {{CONFIGS}}; do
     NS=$(just _build_ns ${CFG})
-    kubectl -n "$NS" delete jobs -l app=glm-pareto --ignore-not-found=true 2>/dev/null || true
+    kubectl -n "$NS" delete jobs -l app=pareto --ignore-not-found=true 2>/dev/null || true
   done
 
 # Tear down model servers in all namespaces

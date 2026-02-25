@@ -3,16 +3,16 @@ kind: Job
 metadata:
   name: ${JOB_NAME}
   labels:
-    app: glm-pareto
-    glm-pareto/config: ${CONFIG_NAME}
+    app: pareto
+    pareto/config: ${CONFIG_NAME}
 spec:
   backoffLimit: 2
   ttlSecondsAfterFinished: 86400
   template:
     metadata:
       labels:
-        app: glm-pareto
-        glm-pareto/config: ${CONFIG_NAME}
+        app: pareto
+        pareto/config: ${CONFIG_NAME}
     spec:
       serviceAccountName: poker
       restartPolicy: Never
@@ -38,7 +38,7 @@ spec:
               uv pip install vllm
 
               # CONFIG_NAME is the human-readable config identifier (e.g. agg-tp8)
-              # TARGET is the llm-d guide name (glm-agg or glm-disagg) used for
+              # TARGET is the llm-d guide name (agg or disagg) used for
               # gateway URL construction and GPU detection via pod labels.
               CONFIG_NAME="${CONFIG_NAME}"
               TARGET="${TARGET}"

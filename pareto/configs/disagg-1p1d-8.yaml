@@ -1,0 +1,12 @@
+# 8 GPU disaggregated: 1 prefill (TP=4) + 1 decode (TP=4)
+# Base: disagg
+expert_parallel: false
+decode:
+  parallelism:
+    tensor: 4
+  replicas: 1
+
+prefill:
+  parallelism:
+    tensor: 4
+  replicas: 1

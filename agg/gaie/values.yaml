@@ -12,7 +12,7 @@ inferenceExtension:
   monitoring:
     interval: "10s"
     # Prometheus disabled — the shared Secret "inference-gateway-sa-metrics-reader-secret"
-    # is owned by the glm-disagg release and the chart hardcodes its name.
+    # is owned by the disagg release and the chart hardcodes its name.
     # Model server metrics still come through via PodMonitors from the ms release.
     prometheus:
       enabled: false
@@ -24,4 +24,4 @@ inferencePool:
   modelServers:
     matchLabels:
       llm-d.ai/inference-serving: "true"
-      llm-d.ai/guide: "glm-agg"
+      llm-d.ai/guide: "agg"

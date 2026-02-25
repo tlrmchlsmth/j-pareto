@@ -1,0 +1,70 @@
+exps:
+  - llama31_70b_1gpu_agg
+  - llama31_70b_2gpu_agg
+  - llama31_70b_4gpu_agg
+  - llama31_70b_8gpu_agg
+  - llama31_70b_8gpu_disagg
+  - llama31_70b_16gpu_disagg
+  - llama31_70b_32gpu_disagg
+
+_agg: &agg
+  mode: "patch"
+  model_name: "neuralmagic/Meta-Llama-3.1-70B-Instruct-FP8"
+  system_name: "h200_sxm"
+  backend_name: "vllm"
+  database_mode: "HYBRID"
+  isl: 4096
+  osl: 256
+  ttft: 500.0
+  tpot: 15.0
+  serving_mode: "agg"
+  use_specific_quant_mode: "fp8"
+  config:
+    worker_config:
+      moe_tp_list: [1]
+
+_disagg: &disagg
+  mode: "patch"
+  model_name: "neuralmagic/Meta-Llama-3.1-70B-Instruct-FP8"
+  system_name: "h200_sxm"
+  backend_name: "vllm"
+  database_mode: "HYBRID"
+  isl: 4096
+  osl: 256
+  ttft: 500.0
+  tpot: 15.0
+  serving_mode: "disagg"
+  use_specific_quant_mode: "fp8"
+  config:
+    prefill_worker_config:
+      moe_tp_list: [1]
+    decode_worker_config:
+      moe_tp_list: [1]
+
+llama31_70b_1gpu_agg:
+  <<: *agg
+  total_gpus: 1
+
+llama31_70b_2gpu_agg:
+  <<: *agg
+  total_gpus: 2
+
+llama31_70b_4gpu_agg:
+  <<: *agg
+  total_gpus: 4
+
+llama31_70b_8gpu_agg:
+  <<: *agg
+  total_gpus: 8
+
+llama31_70b_8gpu_disagg:
+  <<: *disagg
+  total_gpus: 8
+
+llama31_70b_16gpu_disagg:
+  <<: *disagg
+  total_gpus: 16
+
+llama31_70b_32gpu_disagg:
+  <<: *disagg
+  total_gpus: 32
