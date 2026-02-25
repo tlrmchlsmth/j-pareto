@@ -45,8 +45,6 @@ decode:
         - "--gpu-memory-utilization"
         - "0.95"
       env:
-#        - name: VLLM_ROCM_USE_AITER
-#          value: "1"
         - name: HF_HOME
           value: "/model-cache"
         - name: HF_TOKEN

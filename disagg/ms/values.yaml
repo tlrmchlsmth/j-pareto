@@ -60,8 +60,6 @@ decode:
           value: "41"
         - name: UCX_MAX_RMA_RAILS
           value: "1"
-#        - name: VLLM_ROCM_USE_AITER
-#          value: "1"
         - name: VLLM_NIXL_SIDE_CHANNEL_HOST
           valueFrom:
             fieldRef:
