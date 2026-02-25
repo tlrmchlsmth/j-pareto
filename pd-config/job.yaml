@@ -84,7 +84,7 @@ spec:
                 --data-parallel-size ${DP} \
                 --gpu-memory-utilization ${GPU_MEM_UTIL} \
                 --disable-uvicorn-access-log \
-                $KV_ARGS $EP_ARGS \
+                $KV_ARGS $EP_ARGS ${EXTRA_VLLM_ARGS} \
                 2>&1 &
               VLLM_PID=$!
 
@@ -209,8 +209,8 @@ spec:
                   optional: true
             - name: VLLM_LOGGING_LEVEL
               value: INFO
-#            - name: VLLM_ROCM_USE_AITER
-#              value: "1"
+            - name: VLLM_ROCM_USE_AITER
+              value: "${VLLM_ROCM_USE_AITER}"
           volumeMounts:
             - name: shm
               mountPath: /dev/shm
