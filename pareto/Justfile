@@ -27,8 +27,8 @@ export POKER_IMAGE := env("POKER_IMAGE", "quay.io/tms/poker:0.0.13")
 
 # Extra vLLM args to inject into all model server containers (space-separated)
 export EXTRA_ARGS := env("EXTRA_ARGS", "")
-# Use aiter env - force user to set it.
-export VLLM_ROCM_USE_AITER := env("VLLM_ROCM_USE_AITER")
+# Use aiter env
+export VLLM_ROCM_USE_AITER := env("VLLM_ROCM_USE_AITER", "")
 
 # Sweep type can be eval or bench
 export SWEEP_TYPE := env("SWEEP_TYPE", "bench")
@@ -262,7 +262,7 @@ deploy CONFIG:
   ep = '$IS_EP' == 'yes'
   image_override = '{{IMAGE}}'
   aiter_override = '{{VLLM_ROCM_USE_AITER}}'
-  if ep or extra_args:
+  if ep or extra_args or image_override or aiter_override:
       with open('ms/values.yaml') as f:
           base = yaml.safe_load(f)
       for role in ('decode', 'prefill'):
