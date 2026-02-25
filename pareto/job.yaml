@@ -89,8 +89,11 @@ spec:
               echo "CONFIG: target=$CONFIG_NAME model=$MODEL isl=$ISL osl=$OSL gpu_count=$GPU_COUNT"
 
               if [ "$SWEEP_TYPE" = "eval" ]; then
+                uv pip install lm-eval[vllm]
+                uv pip install lm-eval[api]
+
                 echo "EVAL_START"
-                echo "CONFIG: target=$CONFIG_NAME model=$MODEL tasks=$EVAL_TASKS gpu_count=$GPU_COUNT"
+                echo "CONFIG: target=$CONFIG_NAME model=$MODEL gpu_count=$GPU_COUNT"
 
                 # Run lm_eval against the vLLM OpenAI-compatible endpoint
                 lm_eval \
