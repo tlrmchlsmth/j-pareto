@@ -14,6 +14,8 @@ environments:
 {{- $rn := (env "RELEASE_NAME_POSTFIX") | default "disagg" -}}
 {{- $model := env "MODEL" | default "openai/gpt-oss-120b" -}}
 {{- $msValues := env "MS_VALUES" -}}
+{{- $decodeTp := env "DECODE_TP" | default "8" -}}
+{{- $prefillTp := env "PREFILL_TP" | default "4" -}}
 
 repositories:
   - name: llm-d-modelservice
@@ -76,10 +78,24 @@ releases:
       - routing:
           {{ .Environment.Values.routing | toYaml | nindent 10 }}
     {{- end }}
+    {{- /* NIC podAnnotations from gen-nic-values.py; sriov-rdma-vf resources via set */}}
+    {{- if env "DECODE_TP" }}
+      - ms/values-nic-generated.yaml
+    {{- end }}
     set:
       - name: modelArtifacts.uri
         value: {{ printf "hf://%s" $model | quote }}
       - name: modelArtifacts.name
         value: {{ $model | quote }}
+    {{- if $decodeTp }}
+      - name: decode.containers[0].resources.limits.nvidia\.com/sriov-rdma-vf
+        value: {{ $decodeTp | quote }}
+      - name: decode.containers[0].resources.requests.nvidia\.com/sriov-rdma-vf
+        value: {{ $decodeTp | quote }}
+      - name: prefill.containers[0].resources.limits.nvidia\.com/sriov-rdma-vf
+        value: {{ $prefillTp | quote }}
+      - name: prefill.containers[0].resources.requests.nvidia\.com/sriov-rdma-vf
+        value: {{ $prefillTp | quote }}
+    {{- end }}
     labels:
       kind: inference-stack
