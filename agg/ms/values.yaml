@@ -25,16 +25,7 @@ decode:
     data: 1
   replicas: 1
   extraConfig:
-    affinity:
-      podAntiAffinity:
-        requiredDuringSchedulingIgnoredDuringExecution:
-          - labelSelector:
-              matchExpressions:
-                - key: llm-d.ai/inference-serving
-                  operator: In
-                  values: ["true"]
-            namespaceSelector: {}
-            topologyKey: kubernetes.io/hostname
+    hostNetwork: false
   monitoring:
     podmonitor:
       enabled: true
@@ -45,7 +36,9 @@ decode:
     - name: "vllm"
       image: ghcr.io/vcave/llm-d/llm-d-rocm:v0.4.7-debug
       securityContext:
-        privileged: true
+        capabilities:
+          add:
+            - IPC_LOCK
       modelCommand: vllmServe
       args:
         - "--disable-uvicorn-access-log"
