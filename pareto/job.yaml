@@ -87,53 +87,67 @@ spec:
 
               echo "SWEEP_START"
               echo "CONFIG: target=$CONFIG_NAME model=$MODEL isl=$ISL osl=$OSL gpu_count=$GPU_COUNT"
-              echo "TARGET_DURATION: ${TARGET_DURATION}s  MIN_PROMPTS: ${MIN_PROMPTS}"
-              echo "CONCURRENCY_LEVELS: $CONCURRENCY_LEVELS"
 
-              for MC in $CONCURRENCY_LEVELS; do
-                echo ""
+              if [ "$SWEEP_TYPE" = "eval" ]; then
+                echo "EVAL_START"
+                echo "CONFIG: target=$CONFIG_NAME model=$MODEL tasks=$EVAL_TASKS gpu_count=$GPU_COUNT"
 
-                # Calibration: small run to estimate throughput
-                CALIB_N=$((MC > 20 ? MC : 20))
-                echo "CALIBRATION: concurrency=$MC num_prompts=$CALIB_N"
-                CALIB_OUTPUT=$(vllm bench serve \
-                  --base-url "$URL" \
-                  --model "$MODEL" \
-                  --dataset-name random \
-                  --random-input-len $ISL \
-                  --random-output-len $OSL \
-                  --max-concurrency $MC \
-                  --num-prompts $CALIB_N \
-                  --ignore-eos \
-                  --request-rate 4096 \
-                  --seed $(date +%M%H%M%S) 2>&1)
-                echo "$CALIB_OUTPUT"
+                # Run lm_eval against the vLLM OpenAI-compatible endpoint
+                lm_eval \
+                  --model local-completions \
+                  --model_args base_url="$URL/v1/completions",model="$MODEL",num_concurrent=512,tokenized_requests=False,trust_remote_code=True \
+                  --tasks gsm8k 
+                echo "EVAL_END"
 
-                # Compute num_prompts for target duration
-                THROUGHPUT=$(echo "$CALIB_OUTPUT" | grep -i "Total Token throughput" | grep -oE '[0-9]+\.[0-9]+' | tail -1)
-                TOKENS_PER_REQ=$((ISL + OSL))
-                if [ -n "${THROUGHPUT:-}" ]; then
-                  NP=$(python3 -c "import math; r=float('$THROUGHPUT')/$TOKENS_PER_REQ; print(max($MIN_PROMPTS, math.ceil(r * $TARGET_DURATION)))")
-                else
-                  NP=$MIN_PROMPTS
-                fi
-                echo "COMPUTED_NUM_PROMPTS: $NP (throughput=${THROUGHPUT:-n/a} tok/s)"
+              else
 
-                # Main benchmark run
-                echo "BENCH_RUN: concurrency=$MC num_prompts=$NP"
-                vllm bench serve \
-                  --base-url "$URL" \
-                  --model "$MODEL" \
-                  --dataset-name random \
-                  --random-input-len $ISL \
-                  --random-output-len $OSL \
-                  --max-concurrency $MC \
-                  --num-prompts $NP \
-                  --ignore-eos \
-                  --request-rate 4096 \
-                  --seed $(date +%M%H%M%S)
-                echo "BENCH_RUN_END: concurrency=$MC"
-              done
+                echo "TARGET_DURATION: ${TARGET_DURATION}s  MIN_PROMPTS: ${MIN_PROMPTS}"
+                echo "CONCURRENCY_LEVELS: $CONCURRENCY_LEVELS"
+                for MC in $CONCURRENCY_LEVELS; do
+                  echo ""
+
+                  # Calibration: small run to estimate throughput
+                  CALIB_N=$((MC > 20 ? MC : 20))
+                  echo "CALIBRATION: concurrency=$MC num_prompts=$CALIB_N"
+                  CALIB_OUTPUT=$(vllm bench serve \
+                    --base-url "$URL" \
+                    --model "$MODEL" \
+                    --dataset-name random \
+                    --random-input-len $ISL \
+                    --random-output-len $OSL \
+                    --max-concurrency $MC \
+                    --num-prompts $CALIB_N \
+                    --ignore-eos \
+                    --request-rate 4096 \
+                    --seed $(date +%M%H%M%S) 2>&1)
+                  echo "$CALIB_OUTPUT"
+
+                  # Compute num_prompts for target duration
+                  THROUGHPUT=$(echo "$CALIB_OUTPUT" | grep -i "Total Token throughput" | grep -oE '[0-9]+\.[0-9]+' | tail -1)
+                  TOKENS_PER_REQ=$((ISL + OSL))
+                  if [ -n "${THROUGHPUT:-}" ]; then
+                    NP=$(python3 -c "import math; r=float('$THROUGHPUT')/$TOKENS_PER_REQ; print(max($MIN_PROMPTS, math.ceil(r * $TARGET_DURATION)))")
+                  else
+                    NP=$MIN_PROMPTS
+                  fi
+                  echo "COMPUTED_NUM_PROMPTS: $NP (throughput=${THROUGHPUT:-n/a} tok/s)"
+
+                  # Main benchmark run
+                  echo "BENCH_RUN: concurrency=$MC num_prompts=$NP"
+                  vllm bench serve \
+                    --base-url "$URL" \
+                    --model "$MODEL" \
+                    --dataset-name random \
+                    --random-input-len $ISL \
+                    --random-output-len $OSL \
+                    --max-concurrency $MC \
+                    --num-prompts $NP \
+                    --ignore-eos \
+                    --request-rate 4096 \
+                    --seed $(date +%M%H%M%S)
+                  echo "BENCH_RUN_END: concurrency=$MC"
+                done
+              fi
 
               echo ""
               echo "SWEEP_END"

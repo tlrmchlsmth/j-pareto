@@ -30,6 +30,8 @@ export EXTRA_ARGS := env("EXTRA_ARGS", "")
 # Use aiter env - force user to set it.
 export VLLM_ROCM_USE_AITER := env("VLLM_ROCM_USE_AITER")
 
+# Sweep type can be eval or bench
+export SWEEP_TYPE := env("SWEEP_TYPE", "bench")
 
 default:
   just --list
@@ -362,8 +364,9 @@ sweep CONFIG:
     CONCURRENCY_LEVELS="{{CONCURRENCIES}}" \
     TARGET_DURATION={{TARGET_DURATION}} \
     MIN_PROMPTS={{MIN_PROMPTS}} \
+    SWEEP_TYPE={{SWEEP_TYPE}} \
     POKER_IMAGE="{{POKER_IMAGE}}" \
-    envsubst '${JOB_NAME} ${CONFIG_NAME} ${TARGET} ${NAMESPACE} ${ISL} ${OSL} ${CONCURRENCY_LEVELS} ${TARGET_DURATION} ${MIN_PROMPTS} ${POKER_IMAGE}' \
+    envsubst '${JOB_NAME} ${CONFIG_NAME} ${TARGET} ${NAMESPACE} ${ISL} ${OSL} ${CONCURRENCY_LEVELS} ${TARGET_DURATION} ${MIN_PROMPTS} ${SWEEP_TYPE} ${POKER_IMAGE}' \
       < job.yaml | kubectl -n "$NS" replace --force -f -
 
 # Wait for a config's sweep job to complete
