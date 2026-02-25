@@ -25,7 +25,7 @@ spec:
           effect: "NoSchedule"
       containers:
         - name: bench
-          image: ${IMAGE}
+          image: ${POKER_IMAGE}
           imagePullPolicy: Always
           command: ["/bin/bash", "-c"]
           args:
