@@ -3,14 +3,16 @@ set dotenv-path := "../.env"
 
 NAMESPACE := env("NAMESPACE", env("USER", "anon"))
 KN := "kubectl -n " + NAMESPACE
-MODEL := "openai/gpt-oss-120b"
+#MODEL := "openai/gpt-oss-120b"
+MODEL := "RedHatAI/Llama-3.3-70B-Instruct-FP8-dynamic"
 
 default:
   just --list
 
-# Deploy the disaggregated stack (2x TP=4 prefill + 1x TP=8 decode)
-deploy:
-  MODEL="{{MODEL}}" helmfile apply -n {{NAMESPACE}}
+# Deploy the disaggregated stack
+deploy DECODE_TP="2" PREFILL_TP="1" CONFIG="default":
+  DECODE_TP={{DECODE_TP}} PREFILL_TP={{PREFILL_TP}} CONFIG={{CONFIG}} python3 scripts/gen-nic-values.py
+  DECODE_TP={{DECODE_TP}} PREFILL_TP={{PREFILL_TP}} CONFIG={{CONFIG}} MODEL="{{MODEL}}" helmfile apply -n {{NAMESPACE}}
   {{KN}} apply -f httproute.yaml
 
 # Deploy with specific gateway provider

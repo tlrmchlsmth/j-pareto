@@ -8,9 +8,9 @@ MODEL := "openai/gpt-oss-120b"
 default:
   just --list
 
-# Deploy the aggregated stack (1x TP=8, no P/D)
-deploy:
-  MODEL="{{MODEL}}" helmfile apply -n {{NAMESPACE}}
+# Deploy the aggregated stack (no P/D split)
+deploy TP="8":
+  TP={{TP}} MODEL="{{MODEL}}" helmfile apply -n {{NAMESPACE}}
   {{KN}} apply -f httproute.yaml
 
 # Deploy with specific gateway provider

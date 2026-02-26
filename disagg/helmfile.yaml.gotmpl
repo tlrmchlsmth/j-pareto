@@ -89,10 +89,14 @@ releases:
       - name: modelArtifacts.name
         value: {{ $model | quote }}
     {{- if $decodeTp }}
+      - name: decode.parallelism.tensor
+        value: {{ $decodeTp | quote }}
       - name: decode.containers[0].resources.limits.nvidia\.com/sriov-rdma-vf
         value: {{ $decodeTp | quote }}
       - name: decode.containers[0].resources.requests.nvidia\.com/sriov-rdma-vf
         value: {{ $decodeTp | quote }}
+      - name: prefill.parallelism.tensor
+        value: {{ $prefillTp | quote }}
       - name: prefill.containers[0].resources.limits.nvidia\.com/sriov-rdma-vf
         value: {{ $prefillTp | quote }}
       - name: prefill.containers[0].resources.requests.nvidia\.com/sriov-rdma-vf

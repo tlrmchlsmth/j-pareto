@@ -22,7 +22,7 @@ accelerator:
 
 decode:
   parallelism:
-    tensor: 8
+    tensor: 2
   create: true
   replicas: 1
   # podAnnotations (k8s.v1.cni.cncf.io/networks) and nvidia.com/sriov-rdma-vf resources
@@ -140,9 +140,9 @@ decode:
 
 prefill:
   parallelism:
-    tensor: 4
+    tensor: 1
   create: true
-  replicas: 2
+  replicas: 1
   # podAnnotations and nvidia.com/sriov-rdma-vf injected by helmfile (PREFILL_TP)
   extraConfig:
     hostNetwork: false
