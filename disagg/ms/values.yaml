@@ -35,6 +35,12 @@ decode:
       portName: "vllm"
       path: "/metrics"
       interval: "30s"
+  initContainers: 
+    - name: qos-downgrade
+      image: "quay.io/tms/poker:0.0.13" # dummy
+      imagePullPolicy: IfNotPresent
+      command: ["/bin/bash", "-c", "exit 0"]
+      resources: {}
   containers:
     - name: "vllm"
       image: ghcr.io/vcave/llm-d/llm-d-rocm:v0.4.7-debug
@@ -146,6 +152,12 @@ prefill:
       portName: "vllm"
       path: "/metrics"
       interval: "30s"
+  initContainers: 
+    - name: qos-downgrade
+      image: "quay.io/tms/poker:0.0.13" # dummy
+      imagePullPolicy: IfNotPresent
+      command: ["/bin/bash", "-c", "exit 0"]
+      resources: {}
   containers:
     - name: "vllm"
       image: ghcr.io/vcave/llm-d/llm-d-rocm:v0.4.7-debug

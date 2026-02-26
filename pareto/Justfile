@@ -250,7 +250,8 @@ deploy CONFIG:
   IS_EP=$(just _is_ep_cfg {{CONFIG}})
   # Build overlay: strip expert_parallel, inject EP flag + EXTRA_ARGS into containers
   MS_VALUES=$(mktemp)
-  trap "rm -f $MS_VALUES" EXIT
+  HF_CACHE=$(mktemp -d)
+  trap "rm -f $MS_VALUES; rm -rf $HF_CACHE" EXIT
   echo "Deploying $NS (base=$BASE, ep=${IS_EP})"
   cd "../$BASE"
   python3 -c "
@@ -303,7 +304,7 @@ deploy CONFIG:
   if [[ "{{CONFIG}}" == disagg-* ]]; then
     DECODE_TP="$DECODE_TP" PREFILL_TP="$PREFILL_TP" python3 scripts/gen-nic-values.py
   fi
-  MODEL="{{MODEL}}" MS_VALUES="$MS_VALUES" DECODE_TP="$DECODE_TP" PREFILL_TP="$PREFILL_TP" helmfile apply -n "$NS"
+  HELMFILE_CACHE_HOME="$HF_CACHE" MODEL="{{MODEL}}" MS_VALUES="$MS_VALUES" DECODE_TP="$DECODE_TP" PREFILL_TP="$PREFILL_TP" helmfile apply -n "$NS"
   kubectl -n "$NS" apply -f httproute.yaml
 
 # Wait for model server pods to be ready
