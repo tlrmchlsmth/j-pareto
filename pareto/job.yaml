@@ -136,6 +136,7 @@ spec:
                     --model_args base_url="$URL/v1/completions",model="$MODEL",num_concurrent=512,tokenized_requests=False,trust_remote_code=True \
                     --tasks gsm8k 
                   echo "EVAL_END"
+                fi
 
               else
 
