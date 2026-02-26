@@ -16,6 +16,7 @@ environments:
 {{- $msValues := env "MS_VALUES" -}}
 {{- $decodeTp := env "DECODE_TP" | default "8" -}}
 {{- $prefillTp := env "PREFILL_TP" | default "4" -}}
+{{- $config := env "CONFIG" | default "default" -}}
 
 repositories:
   - name: llm-d-modelservice
@@ -80,7 +81,7 @@ releases:
     {{- end }}
     {{- /* NIC podAnnotations from gen-nic-values.py; sriov-rdma-vf resources via set */}}
     {{- if env "DECODE_TP" }}
-      - ms/values-nic-generated.yaml
+      - ms/values-nic-generated-{{ $config }}.yaml
     {{- end }}
     set:
       - name: modelArtifacts.uri

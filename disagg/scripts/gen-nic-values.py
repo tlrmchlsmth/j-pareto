@@ -16,6 +16,7 @@ from pathlib import Path
 def main():
     decode_tp = int(os.environ.get("DECODE_TP", "8"))
     prefill_tp = int(os.environ.get("PREFILL_TP", "4"))
+    config = os.environ.get("CONFIG")
 
     def networks_json(n: int) -> str:
         entries = [
@@ -39,7 +40,7 @@ prefill:
       {networks_json(prefill_tp)}
 """
 
-    out_path = Path(__file__).resolve().parent.parent / "ms" / "values-nic-generated.yaml"
+    out_path = Path(__file__).resolve().parent.parent / "ms" / f"values-nic-generated-{config}.yaml"
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(yaml_content)
     print(f"Wrote {out_path} (decode={decode_tp} prefill={prefill_tp})", file=sys.stderr)
