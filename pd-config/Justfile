@@ -1,7 +1,7 @@
 set dotenv-load
 set dotenv-path := "../.env"
 
-NAMESPACE := "tms"
+NAMESPACE := env("USER", "dev")
 KN := "kubectl -n " + NAMESPACE
 
 # Benchmark configuration

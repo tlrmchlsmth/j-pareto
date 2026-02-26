@@ -1,7 +1,7 @@
 set dotenv-load
 set dotenv-required
 
-NAMESPACE := "tms"
+NAMESPACE := env("USER", "dev")
 HF_TOKEN := "$HF_TOKEN"
 GH_TOKEN := "$GH_TOKEN"
 
