@@ -32,6 +32,12 @@ decode:
       portName: "vllm"
       path: "/metrics"
       interval: "30s"
+  initContainers: 
+    - name: qos-downgrade
+      image: "quay.io/tms/poker:0.0.13" # dummy
+      imagePullPolicy: IfNotPresent
+      command: ["/bin/bash", "-c", "exit 0"]
+      resources: {}
   containers:
     - name: "vllm"
       image: ghcr.io/vcave/llm-d/llm-d-rocm:v0.4.7-debug
@@ -60,11 +66,11 @@ decode:
       resources:
         limits:
           # amd.com/gpu: 8  # added automatically from parallelism + accelerator
-          memory: 200Gi
+          memory: 400Gi
           cpu: "32"
         requests:
           # amd.com/gpu: 8  # added automatically from parallelism + accelerator
-          memory: 200Gi
+          memory: 400Gi
           cpu: "32"
       mountModelVolume: false
       volumeMounts:
