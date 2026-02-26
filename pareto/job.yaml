@@ -89,18 +89,53 @@ spec:
               echo "CONFIG: target=$CONFIG_NAME model=$MODEL isl=$ISL osl=$OSL gpu_count=$GPU_COUNT"
 
               if [ "$SWEEP_TYPE" = "eval" ]; then
-                uv pip install lm-eval[vllm]
-                uv pip install lm-eval[api]
 
-                echo "EVAL_START"
-                echo "CONFIG: target=$CONFIG_NAME model=$MODEL gpu_count=$GPU_COUNT"
+                # Check if the model name contains "gpt-oss"
+                if [[ "$MODEL" == *"gpt-oss"* ]]; then
+                  echo "Detected gpt-oss model. Running gpt-oss specific evals..."
 
-                # Run lm_eval against the vLLM OpenAI-compatible endpoint
-                lm_eval \
-                  --model local-completions \
-                  --model_args base_url="$URL/v1/completions",model="$MODEL",num_concurrent=512,tokenized_requests=False,trust_remote_code=True \
-                  --tasks gsm8k 
-                echo "EVAL_END"
+                  # Clone the repo if it hasn't been cloned yet
+                  if [ ! -d "gpt-oss" ]; then
+                    git clone https://github.com/openai/gpt-oss.git
+                  fi
+
+                  cd gpt-oss
+
+                  # Optional: If the gpt-oss repo requires its own dependencies to be installed
+                  # uv pip install -r requirements.txt 
+                  uv pip install blobfile
+
+                  echo "EVAL_START"
+                  echo "CONFIG: target=$CONFIG_NAME model=$MODEL gpu_count=$GPU_COUNT"
+
+                  # Run the eval against your existing gateway URL
+                  OPENAI_API_KEY=empty python -m gpt_oss.evals \
+                    --model "$MODEL" \
+                    --eval gpqa \
+                    --n-threads 128 \
+                    --reasoning-effort low \
+                    --base-url "$URL/v1" \
+                    --sampler chat_completions
+
+                  echo "EVAL_END"
+
+                  # Return to previous directory
+                  cd ..
+                  
+                else
+
+                  uv pip install lm-eval[vllm]
+                  uv pip install lm-eval[api]
+
+                  echo "EVAL_START"
+                  echo "CONFIG: target=$CONFIG_NAME model=$MODEL gpu_count=$GPU_COUNT"
+
+                  # Run lm_eval against the vLLM OpenAI-compatible endpoint
+                  lm_eval \
+                    --model local-completions \
+                    --model_args base_url="$URL/v1/completions",model="$MODEL",num_concurrent=512,tokenized_requests=False,trust_remote_code=True \
+                    --tasks gsm8k 
+                  echo "EVAL_END"
 
               else
 
