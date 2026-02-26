@@ -14,6 +14,8 @@ export MAX_GPUS := env("MAX_GPUS", "32")
 
 # Model to deploy
 export MODEL := env("MODEL", "openai/gpt-oss-120b")
+# vllm image to use
+export IMAGE := env("IMAGE", "ghcr.io/vcave/llm-d/llm-d-rocm:v0.4.7-debug")
 
 # Sweep configuration
 export ISL := env("ISL", "4096")
@@ -21,11 +23,15 @@ export OSL := env("OSL", "256")
 export CONCURRENCIES := env("CONCURRENCIES", "4 8 12 16 20 24 28 32 40 48 56 64 80 96 112 128")
 export TARGET_DURATION := env("TARGET_DURATION", "60")
 export MIN_PROMPTS := env("MIN_PROMPTS", "100")
-export IMAGE := env("IMAGE", "quay.io/tms/poker:0.0.13")
+export POKER_IMAGE := env("POKER_IMAGE", "quay.io/tms/poker:0.0.13")
 
 # Extra vLLM args to inject into all model server containers (space-separated)
 export EXTRA_ARGS := env("EXTRA_ARGS", "")
+# Use aiter env
+export VLLM_ROCM_USE_AITER := env("VLLM_ROCM_USE_AITER", "")
 
+# Sweep type can be eval or bench
+export SWEEP_TYPE := env("SWEEP_TYPE", "bench")
 
 default:
   just --list
@@ -244,7 +250,8 @@ deploy CONFIG:
   IS_EP=$(just _is_ep_cfg {{CONFIG}})
   # Build overlay: strip expert_parallel, inject EP flag + EXTRA_ARGS into containers
   MS_VALUES=$(mktemp)
-  trap "rm -f $MS_VALUES" EXIT
+  HF_CACHE=$(mktemp -d)
+  trap "rm -f $MS_VALUES; rm -rf $HF_CACHE" EXIT
   echo "Deploying $NS (base=$BASE, ep=${IS_EP})"
   cd "../$BASE"
   python3 -c "
@@ -254,23 +261,50 @@ deploy CONFIG:
   overlay.pop('expert_parallel', None)
   extra_args = shlex.split('{{EXTRA_ARGS}}')
   ep = '$IS_EP' == 'yes'
-  if ep or extra_args:
+  image_override = '{{IMAGE}}'
+  aiter_override = '{{VLLM_ROCM_USE_AITER}}'
+  if ep or extra_args or image_override or aiter_override:
       with open('ms/values.yaml') as f:
           base = yaml.safe_load(f)
       for role in ('decode', 'prefill'):
           base_role = base.get(role, {})
           if base_role.get('containers') or base_role.get('create', False):
               containers = copy.deepcopy(base_role.get('containers', [{}]))
+              # 1. set args
               args = list(containers[0].get('args', []))
               if ep:
                   args.append('--enable-expert-parallel')
               args.extend(extra_args)
               containers[0]['args'] = args
+
+              # 2. Inject Image
+              if image_override:
+                  containers[0]['image'] = image_override
+
+              # 3. Inject AITER Env Var
+              if aiter_override:
+                  env_vars = containers[0].get('env', [])
+                  found = False
+                  for env in env_vars:
+                      if env.get('name') == 'VLLM_ROCM_USE_AITER':
+                          env['value'] = str(aiter_override)
+                          found = True
+                          break
+                  # If it wasn't in the base values file, append it cleanly
+                  if not found:
+                      env_vars.append({'name': 'VLLM_ROCM_USE_AITER', 'value': str(aiter_override)})
+                  containers[0]['env'] = env_vars
+
               overlay.setdefault(role, {})['containers'] = containers
   with open('$MS_VALUES', 'w') as f:
       yaml.dump(overlay, f, default_flow_style=False)
   "
-  MODEL="{{MODEL}}" MS_VALUES="$MS_VALUES" helmfile apply -n "$NS"
+  DECODE_TP=$(python3 -c "import yaml; d=yaml.safe_load(open('../pareto/configs/{{CONFIG}}.yaml')); print(d.get('decode',{}).get('parallelism',{}).get('tensor',8))")
+  PREFILL_TP=$(python3 -c "import yaml; d=yaml.safe_load(open('../pareto/configs/{{CONFIG}}.yaml')); print(d.get('prefill',{}).get('parallelism',{}).get('tensor',4))")
+  if [[ "{{CONFIG}}" == disagg-* ]]; then
+    CONFIG="{{CONFIG}}" DECODE_TP="$DECODE_TP" PREFILL_TP="$PREFILL_TP" python3 scripts/gen-nic-values.py
+  fi
+  HELMFILE_CACHE_HOME="$HF_CACHE" MODEL="{{MODEL}}" MS_VALUES="$MS_VALUES" DECODE_TP="$DECODE_TP" PREFILL_TP="$PREFILL_TP" CONFIG="{{CONFIG}}" helmfile apply -n "$NS"
   kubectl -n "$NS" apply -f httproute.yaml
 
 # Wait for model server pods to be ready
@@ -331,8 +365,9 @@ sweep CONFIG:
     CONCURRENCY_LEVELS="{{CONCURRENCIES}}" \
     TARGET_DURATION={{TARGET_DURATION}} \
     MIN_PROMPTS={{MIN_PROMPTS}} \
-    IMAGE="{{IMAGE}}" \
-    envsubst '${JOB_NAME} ${CONFIG_NAME} ${TARGET} ${NAMESPACE} ${ISL} ${OSL} ${CONCURRENCY_LEVELS} ${TARGET_DURATION} ${MIN_PROMPTS} ${IMAGE}' \
+    SWEEP_TYPE={{SWEEP_TYPE}} \
+    POKER_IMAGE="{{POKER_IMAGE}}" \
+    envsubst '${JOB_NAME} ${CONFIG_NAME} ${TARGET} ${NAMESPACE} ${ISL} ${OSL} ${CONCURRENCY_LEVELS} ${TARGET_DURATION} ${MIN_PROMPTS} ${SWEEP_TYPE} ${POKER_IMAGE}' \
       < job.yaml | kubectl -n "$NS" replace --force -f -
 
 # Wait for a config's sweep job to complete

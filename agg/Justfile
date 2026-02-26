@@ -1,7 +1,7 @@
 set dotenv-load
 set dotenv-path := "../.env"
 
-NAMESPACE := env("USER", "dev")
+NAMESPACE := env("NAMESPACE", env("USER", "anon"))
 KN := "kubectl -n " + NAMESPACE
 MODEL := "openai/gpt-oss-120b"
 

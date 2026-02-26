@@ -25,35 +25,32 @@ decode:
     data: 1
   replicas: 1
   extraConfig:
-    affinity:
-      podAntiAffinity:
-        requiredDuringSchedulingIgnoredDuringExecution:
-          - labelSelector:
-              matchExpressions:
-                - key: llm-d.ai/inference-serving
-                  operator: In
-                  values: ["true"]
-            namespaceSelector: {}
-            topologyKey: kubernetes.io/hostname
+    hostNetwork: false
   monitoring:
     podmonitor:
       enabled: true
       portName: "vllm"
       path: "/metrics"
       interval: "30s"
+  initContainers: 
+    - name: qos-downgrade
+      image: "quay.io/tms/poker:0.0.13" # dummy
+      imagePullPolicy: IfNotPresent
+      command: ["/bin/bash", "-c", "exit 0"]
+      resources: {}
   containers:
     - name: "vllm"
       image: ghcr.io/vcave/llm-d/llm-d-rocm:v0.4.7-debug
       securityContext:
-        privileged: true
+        capabilities:
+          add:
+            - IPC_LOCK
       modelCommand: vllmServe
       args:
         - "--disable-uvicorn-access-log"
         - "--gpu-memory-utilization"
         - "0.95"
       env:
-#        - name: VLLM_ROCM_USE_AITER
-#          value: "1"
         - name: HF_HOME
           value: "/model-cache"
         - name: HF_TOKEN
@@ -69,11 +66,11 @@ decode:
       resources:
         limits:
           # amd.com/gpu: 8  # added automatically from parallelism + accelerator
-          memory: 200Gi
+          memory: 400Gi
           cpu: "32"
         requests:
           # amd.com/gpu: 8  # added automatically from parallelism + accelerator
-          memory: 200Gi
+          memory: 400Gi
           cpu: "32"
       mountModelVolume: false
       volumeMounts:

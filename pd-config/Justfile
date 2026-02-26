@@ -1,17 +1,19 @@
 set dotenv-load
 set dotenv-path := "../.env"
 
-NAMESPACE := env("USER", "dev")
+NAMESPACE := env("NAMESPACE", env("USER", "anon"))
 KN := "kubectl -n " + NAMESPACE
 
 # Benchmark configuration
-MODEL := "openai/gpt-oss-120b"
-IMAGE := "ghcr.io/vcave/llm-d/llm-d-rocm:v0.4.7-debug"
+MODEL := env("MODEL", "openai/gpt-oss-120b")
+IMAGE := env("IMAGE", "ghcr.io/vcave/llm-d/llm-d-rocm:v0.4.7-debug")
 GPU_MEM_UTIL := "0.95"
 TARGET_DURATION := "60"
 MIN_PROMPTS := "200"
 HF_CACHE := "/mnt/nvme/models"
 PRIORITY_CLASS := "low-priority"
+EXTRA_VLLM_ARGS := env("EXTRA_VLLM_ARGS", "")
+VLLM_ROCM_USE_AITER := env("VLLM_ROCM_USE_AITER", "1")
 
 # EP/DP sweep configuration
 ENABLE_EP := "false"   # Enable --enable-expert-parallel (used by bench, always on for bench-ep/bench-dp)
@@ -75,7 +77,9 @@ _job-yaml JOB_NAME GPU_COUNT TP DP ENABLE_EP WORKLOAD_TYPE ISL OSL CONCURRENCY_L
     HF_CACHE_HOST_PATH="{{HF_CACHE}}" \
     PRIORITY_CLASS="{{PRIORITY_CLASS}}" \
     MULTUS_NETWORKS="$MULTUS_NETWORKS" \
-    envsubst '${JOB_NAME} ${GPU_COUNT} ${TP} ${DP} ${ENABLE_EP} ${MODEL} ${VLLM_IMAGE} ${WORKLOAD_TYPE} ${ISL} ${OSL} ${CONCURRENCY_LEVELS} ${TARGET_DURATION} ${MIN_PROMPTS} ${GPU_MEM_UTIL} ${HF_CACHE_HOST_PATH} ${PRIORITY_CLASS} ${MULTUS_NETWORKS}' \
+    EXTRA_VLLM_ARGS="{{EXTRA_VLLM_ARGS}}" \
+    VLLM_ROCM_USE_AITER={{VLLM_ROCM_USE_AITER}}" \
+    envsubst '${JOB_NAME} ${GPU_COUNT} ${TP} ${DP} ${ENABLE_EP} ${MODEL} ${VLLM_IMAGE} ${WORKLOAD_TYPE} ${ISL} ${OSL} ${CONCURRENCY_LEVELS} ${TARGET_DURATION} ${MIN_PROMPTS} ${GPU_MEM_UTIL} ${HF_CACHE_HOST_PATH} ${PRIORITY_CLASS} ${MULTUS_NETWORKS} ${EXTRA_VLLM_ARGS} ${VLLM_ROCM_USE_AITER}' \
       < job.yaml
 
 # Launch a single benchmark Job
