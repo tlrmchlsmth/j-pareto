@@ -211,6 +211,8 @@ spec:
               value: INFO
             - name: VLLM_ROCM_USE_AITER
               value: "${VLLM_ROCM_USE_AITER}"
+            - name: GPU_ARCHS
+              value: "gfx942"
           volumeMounts:
             - name: shm
               mountPath: /dev/shm
