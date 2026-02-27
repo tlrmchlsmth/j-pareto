@@ -59,6 +59,8 @@ decode:
               name: hf-secret
               key: HF_TOKEN
               optional: true
+        - name: GPU_ARCHS
+          value: "gfx942"
       ports:
         - containerPort: 8000
           name: vllm
