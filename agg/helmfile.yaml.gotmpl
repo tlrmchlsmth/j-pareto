@@ -14,7 +14,7 @@ environments:
 {{- $rn := (env "RELEASE_NAME_POSTFIX") | default "agg" -}}
 {{- $model := env "MODEL" | default "openai/gpt-oss-120b" -}}
 {{- $msValues := env "MS_VALUES" -}}
-{{- $tp := env "TP" | default "8" -}}
+{{- $tp := env "TP" | default "" -}}
 
 repositories:
   - name: llm-d-modelservice
@@ -78,7 +78,9 @@ releases:
         value: {{ printf "hf://%s" $model | quote }}
       - name: modelArtifacts.name
         value: {{ $model | quote }}
+    {{- if $tp }}
       - name: decode.parallelism.tensor
         value: {{ $tp | quote }}
+    {{- end }}
     labels:
       kind: inference-stack

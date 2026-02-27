@@ -213,6 +213,8 @@ spec:
               value: "${VLLM_ROCM_USE_AITER}"
             - name: GPU_ARCHS
               value: "gfx942"
+            - name: AITER_JIT_DIR
+              value: "/aiter-cache"
           volumeMounts:
             - name: shm
               mountPath: /dev/shm
@@ -220,6 +222,8 @@ spec:
               mountPath: /.cache
             - name: hf-cache
               mountPath: /root/.cache/huggingface
+            - name: aiter-cache
+              mountPath: /aiter-cache
       volumes:
         - name: shm
           emptyDir:
@@ -230,4 +234,8 @@ spec:
         - name: hf-cache
           hostPath:
             path: ${HF_CACHE_HOST_PATH}
+            type: DirectoryOrCreate
+        - name: aiter-cache
+          hostPath:
+            path: /mnt/nvme/cache
             type: DirectoryOrCreate
