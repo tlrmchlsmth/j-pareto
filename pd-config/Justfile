@@ -78,7 +78,7 @@ _job-yaml JOB_NAME GPU_COUNT TP DP ENABLE_EP WORKLOAD_TYPE ISL OSL CONCURRENCY_L
     PRIORITY_CLASS="{{PRIORITY_CLASS}}" \
     MULTUS_NETWORKS="$MULTUS_NETWORKS" \
     EXTRA_VLLM_ARGS="{{EXTRA_VLLM_ARGS}}" \
-    VLLM_ROCM_USE_AITER={{VLLM_ROCM_USE_AITER}}" \
+    VLLM_ROCM_USE_AITER="{{VLLM_ROCM_USE_AITER}}" \
     envsubst '${JOB_NAME} ${GPU_COUNT} ${TP} ${DP} ${ENABLE_EP} ${MODEL} ${VLLM_IMAGE} ${WORKLOAD_TYPE} ${ISL} ${OSL} ${CONCURRENCY_LEVELS} ${TARGET_DURATION} ${MIN_PROMPTS} ${GPU_MEM_UTIL} ${HF_CACHE_HOST_PATH} ${PRIORITY_CLASS} ${MULTUS_NETWORKS} ${EXTRA_VLLM_ARGS} ${VLLM_ROCM_USE_AITER}' \
       < job.yaml
 
@@ -114,6 +114,27 @@ bench-full:
   YAML=""
   for TP in 1 2 4 8; do
     for DP in 1 2 4 8; do
+      GPU_COUNT=$((TP * DP))
+      # Enable EP if using DP
+      if [ $DP -ne 1 ]; then EP=true; else EP=false; fi
+      if [ $GPU_COUNT -ge {{MIN_GPU}} ] && [ $GPU_COUNT -le {{MAX_GPU}} ]; then
+        YAML+="$(just _job-yaml "pd-config-prefill-tp${TP}dp${DP}" $GPU_COUNT $TP $DP $EP prefill {{PREFILL_ISL}} {{PREFILL_OSL}} "{{PREFILL_CONCURRENCIES}}")"$'\n'
+        YAML+="$(just _job-yaml "pd-config-decode-tp${TP}dp${DP}" $GPU_COUNT $TP $DP $EP decode {{DECODE_ISL}} {{DECODE_OSL}} "{{DECODE_CONCURRENCIES}}")"$'\n'
+        YAML+="$(just _job-yaml "pd-config-agg-tp${TP}dp${DP}" $GPU_COUNT $TP $DP $EP aggregated {{AGG_ISL}} {{AGG_OSL}} "{{AGG_CONCURRENCIES}}")"$'\n'
+        COUNT=$((COUNT + 3))
+      fi
+    done
+  done
+  echo "$YAML" | {{KN}} replace --force -f -
+  echo "Launched $COUNT jobs ($(( COUNT / 3 )) TP×DP configs × 3 workloads)"
+
+bench-tp-full:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  COUNT=0
+  YAML=""
+  for TP in 1 2 4 8; do
+    for DP in 1; do
       GPU_COUNT=$((TP * DP))
       # Enable EP if using DP
       if [ $DP -ne 1 ]; then EP=true; else EP=false; fi
@@ -169,8 +190,8 @@ collect:
   python3 collect.py -n {{NAMESPACE}}
 
 # Collect results and upload to Google Sheets with Pareto charts
-collect-sheets TITLE="PD Config Benchmark Results":
-  python3 collect.py -n {{NAMESPACE}} --sheets "{{TITLE}}"
+collect-sheets TITLE="PD Config ":
+  python3 collect.py -n {{NAMESPACE}} --sheets "{{TITLE}} {{MODEL}} {{IMAGE}} {{EXTRA_VLLM_ARGS}} VLLM_ROCM_USE_AITER={{VLLM_ROCM_USE_AITER}}"
 
 # Show status of benchmark Jobs and Pods
 status:
