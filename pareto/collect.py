@@ -268,26 +268,6 @@ def build_pareto_data(results_by_target: dict[str, list[BenchResult]]) -> list[l
     return rows
 
 
-def build_ttft_pareto_data(results_by_target: dict[str, list[BenchResult]]) -> list[list]:
-    """Build TTFT vs throughput chart data for Google Sheets scatter chart.
-
-    Shows interactivity (TTFT) as a function of output throughput.
-    Column A = Output tok/s (shared X-axis), one Y column per target with median TTFT.
-    """
-    targets = sorted(results_by_target.keys())
-    header = ["Output tok/s"] + [f"{t} TTFT p50 (ms)" for t in targets]
-    rows = [header]
-
-    for t in targets:
-        t_results = sorted(results_by_target[t], key=lambda r: r.concurrency)
-        col_idx = targets.index(t)
-        for r in t_results:
-            row = [int(round(r.output_throughput))] + [""] * len(targets)
-            row[col_idx + 1] = round(r.ttft.median, 1) if r.ttft.median else ""
-            rows.append(row)
-
-    return rows
-
 
 def _fmt_bold(sheet_id: int, r0: int, r1: int,
               c0: int = 0, c1: int = 20) -> dict:
@@ -447,32 +427,9 @@ def upload_to_sheets(
         y_title="Throughput per GPU (tok/s)",
     ))
 
-    # TTFT vs throughput chart data
-    ttft_gap_row = chart_anchor + 30
-    ttft_start_row = ttft_gap_row + 1
-    ttft_rows = build_ttft_pareto_data(results_by_target)
-    # Pad with empty rows to reach the gap
-    while len(all_rows) < ttft_gap_row:
-        all_rows.append([])
-    ttft_start_idx = len(all_rows)
-    all_rows.extend(ttft_rows)
-    ttft_end_idx = ttft_start_idx + len(ttft_rows)
-    ttft_chart_anchor = ttft_end_idx + 1
-
-    fmt_requests.append(_fmt_bold(results_ws.id, ttft_start_idx, ttft_start_idx + 1))
-    fmt_requests.append(_create_scatter_chart(
-        results_ws.id,
-        "Interactivity vs Throughput (TTFT)",
-        ttft_start_idx, ttft_end_idx,
-        num_series,
-        ttft_chart_anchor,
-        x_title="Output Throughput (tok/s)",
-        y_title="TTFT median (ms)",
-    ))
-
     results_ws.update(range_name="A1", values=all_rows)
-    if results_ws.row_count < ttft_chart_anchor + 30:
-        results_ws.resize(rows=ttft_chart_anchor + 30)
+    if results_ws.row_count < chart_anchor + 30:
+        results_ws.resize(rows=chart_anchor + 30)
     sh.batch_update({"requests": fmt_requests})
 
     total_results = sum(len(v) for v in results_by_target.values())
