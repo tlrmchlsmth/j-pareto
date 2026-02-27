@@ -211,10 +211,15 @@ spec:
               value: INFO
             - name: VLLM_ROCM_USE_AITER
               value: "${VLLM_ROCM_USE_AITER}"
-            - name: GPU_ARCHS
-              value: "gfx942"
             - name: AITER_JIT_DIR
               value: "/aiter-cache"
+            # Aiter compilation env vars
+            - name: PYTORCH_ROCM_ARCH
+              value: "gfx942"
+            - name: GPU_ARCHS
+              value: "gfx942"
+            - name: MAX_JOBS
+              value: "64"
           volumeMounts:
             - name: shm
               mountPath: /dev/shm

@@ -399,7 +399,7 @@ collect-sheets TITLE="":
   set -euo pipefail
   TITLE="{{TITLE}}"
   if [[ -z "$TITLE" ]]; then
-    TITLE="$(basename '{{MODEL}}') Pareto Sweep"
+    TITLE="$(basename '{{MODEL}}') Pareto Sweep {{IMAGE}} {{EXTRA_ARGS}} VLLM_ROCM_USE_AITER={{VLLM_ROCM_USE_AITER}}"
   fi
   NAMESPACES=""
   for CFG in {{CONFIGS}}; do
