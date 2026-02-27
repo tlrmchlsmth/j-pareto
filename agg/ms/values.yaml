@@ -59,10 +59,16 @@ decode:
               name: hf-secret
               key: HF_TOKEN
               optional: true
-        - name: GPU_ARCHS
-          value: "gfx942"
         - name: AITER_JIT_DIR
           value: "/aiter-cache"
+        # Aiter compilation env vars
+        - name: PYTORCH_ROCM_ARCH
+          value: "gfx942"
+        - name: GPU_ARCHS
+          value: "gfx942"
+        - name: MAX_JOBS
+          value: "64"
+
       ports:
         - containerPort: 8000
           name: vllm
