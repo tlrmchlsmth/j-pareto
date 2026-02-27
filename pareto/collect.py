@@ -517,15 +517,6 @@ def write_csv(results_by_target: dict[str, list[BenchResult]], output_dir: str) 
             w.writerow(row)
     print(f"Written: {path}")
 
-    ttft_rows = build_ttft_pareto_data(results_by_target)
-    path = f"{output_dir}/ttft-pareto.csv"
-    with open(path, "w", newline="") as f:
-        w = csv.writer(f)
-        for row in ttft_rows:
-            w.writerow(row)
-    print(f"Written: {path}")
-
-
 def main():
     parser = argparse.ArgumentParser(
         description="Collect pareto sweep results from Kubernetes Job logs"
