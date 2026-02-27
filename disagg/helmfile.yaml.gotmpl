@@ -14,8 +14,8 @@ environments:
 {{- $rn := (env "RELEASE_NAME_POSTFIX") | default "disagg" -}}
 {{- $model := env "MODEL" | default "openai/gpt-oss-120b" -}}
 {{- $msValues := env "MS_VALUES" -}}
-{{- $decodeTp := env "DECODE_TP" | default "8" -}}
-{{- $prefillTp := env "PREFILL_TP" | default "4" -}}
+{{- $decodeTp := env "DECODE_TP" | default "" -}}
+{{- $prefillTp := env "PREFILL_TP" | default "" -}}
 {{- $config := env "CONFIG" | default "default" -}}
 
 repositories:

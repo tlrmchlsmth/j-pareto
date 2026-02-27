@@ -80,6 +80,8 @@ decode:
               optional: true
         - name: GPU_ARCHS
           value: "gfx942"
+        - name: AITER_JIT_DIR
+          value: "/aiter-cache"
       ports:
         - containerPort: 8200
           name: vllm
@@ -104,6 +106,8 @@ decode:
           mountPath: /.cache
         - name: hf-cache
           mountPath: /model-cache
+        - name: aiter-cache
+          mountPath: /aiter-cache
       startupProbe:
         httpGet:
           path: /v1/models
@@ -138,6 +142,10 @@ decode:
     - name: hf-cache
       hostPath:
         path: /mnt/nvme/models
+        type: DirectoryOrCreate
+    - name: aiter-cache
+      hostPath:
+        path: /mnt/nvme/cache
         type: DirectoryOrCreate
 
 prefill:
@@ -201,6 +209,8 @@ prefill:
               optional: true
         - name: GPU_ARCHS
           value: "gfx942"
+        - name: AITER_JIT_DIR
+          value: "/aiter-cache"
       ports:
         - containerPort: 8000
           name: vllm
@@ -225,6 +235,8 @@ prefill:
           mountPath: /.cache
         - name: hf-cache
           mountPath: /model-cache
+        - name: aiter-cache
+          mountPath: /aiter-cache
       startupProbe:
         httpGet:
           path: /v1/models
@@ -259,4 +271,8 @@ prefill:
     - name: hf-cache
       hostPath:
         path: /mnt/nvme/models
+        type: DirectoryOrCreate
+    - name: aiter-cache
+      hostPath:
+        path: /mnt/nvme/cache
         type: DirectoryOrCreate
