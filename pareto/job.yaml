@@ -126,6 +126,7 @@ spec:
 
                   uv pip install lm-eval[vllm]
                   uv pip install lm-eval[api]
+                  uv pip show lm_eval
 
                   echo "EVAL_START"
                   echo "CONFIG: target=$CONFIG_NAME model=$MODEL gpu_count=$GPU_COUNT"
@@ -133,9 +134,10 @@ spec:
                   # Run lm_eval against the vLLM OpenAI-compatible endpoint
                   lm_eval \
                     --model local-completions \
-                    --model_args base_url="$URL/v1/completions",model="$MODEL",num_concurrent=2000,tokenized_requests=False,trust_remote_code=True \
-                    --tasks gsm8k  \
-                    --num_fewshot 3
+                    --model_args base_url="$URL/v1/completions",model="$MODEL",tokenized_requests=False,num_concurrent=512,trust_remote_code=True \
+                    --tasks gsm8k \
+                    --seed 0 \
+                    --gen_kwargs temperature=0.0
 
                   echo "EVAL_END"
                 fi
