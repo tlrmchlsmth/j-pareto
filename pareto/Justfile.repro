@@ -1,0 +1,104 @@
+set dotenv-load
+set dotenv-path := "../.env"
+
+##
+# Repro instructions
+# For collect-sheets to work - please setup google sheets using
+# https://github.com/tlrmchlsmth/j-pareto/blob/main/pd-config/SHEETS_SETUP.md
+#
+# Llama70b
+#  just -f Justfile.repro run RedHatAI/Llama-3.3-70B-Instruct-FP8-dynamic
+#  just -f Justfile.repro collect-sheets RedHatAI/Llama-3.3-70B-Instruct-FP8-dynamic
+#  just -f Justfile.repro destroy RedHatAI/Llama-3.3-70B-Instruct-FP8-dynamic
+# 
+# gpt-oss-120b
+#  just -f Justfile.repro run openai/gpt-oss-120b
+#  just -f Justfile.repro collect-sheets openai/gpt-oss-120b
+#  just -f Justfile.repro destroy openai/gpt-oss-120b
+# 
+# Evals
+#  just -f Justfile.repro eval RedHatAI/Llama-3.3-70B-Instruct-FP8-dynamic
+#   - Read off the results using `kubectl logs` on the pareto* pods 
+#  just -f Justfile.repro destroy RedHatAI/Llama-3.3-70B-Instruct-FP8-dynamic
+# 
+#  just -f Justfile.repro eval openai/gpt-oss-120b
+#   - Read off the results using `kubectl logs` on the pareto* pods 
+#  just -f Justfile.repro destroy openai/gpt-oss-120b
+#
+#  just -f Justfile.repro eval openai/gpt-oss-20b
+#   - Read off the results using `kubectl logs` on the pareto* pods 
+#  just -f Justfile.repro destroy openai/gpt-oss-20b
+
+BASE_JUSTFILE := "./Justfile"
+
+# Avoid users overlapping
+export NSP := env("NSP", env("USER", "anon"))
+
+# Run args
+IMAGE := "ghcr.io/vcave/llm-d/llm-d-rocm:vllm_700_v0151_qk_triton_attn_fix_23c8e6822"
+EXTRA_ARGS := "--attention-backend TRITON_ATTN"
+VLLM_ROCM_USE_AITER := "1"
+
+LLAMA_CONFIGS := env("CONFIGS", "agg-tp1 agg-tp2 agg-tp4 agg-tp8 disagg-3p-tp1-1d-tp2")
+GPTOSS_CONFIGS := env("CONFIGS", "agg-tp1 agg-tp2 agg-tp4 agg-tp8 disagg-3p-tp1-1d-tp2 disagg-2p-tp1-1d-tp2")
+
+THIS_JUSTFILE:="./Justfile.repro"
+
+_resolve_configs MODEL:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    case "{{MODEL}}" in
+        "RedHatAI/Llama-3.3-70B-Instruct-FP8-dynamic")
+            echo "{{LLAMA_CONFIGS}}"
+            ;;
+        "openai/gpt-oss-20b")
+            echo "{{GPTOSS_CONFIGS}}"
+            ;;
+        "openai/gpt-oss-120b")
+            echo "{{GPTOSS_CONFIGS}}"
+            ;;
+        *)
+            echo "ERROR_UNKNOWN_MODEL"
+            exit -1
+            ;;
+    esac
+
+_run_base_cmd BASE_CMD MODEL SWEEP_TYPE CONFIGS:  
+    NSP={{NSP}}                                     \
+    CONFIGS="{{CONFIGS}}"                           \
+    MODEL="{{MODEL}}"                               \
+    IMAGE="{{IMAGE}}"                               \
+    EXTRA_ARGS="{{EXTRA_ARGS}}"                     \
+    VLLM_ROCM_USE_AITER="{{VLLM_ROCM_USE_AITER}}"   \
+    SWEEP_TYPE={{SWEEP_TYPE}}                       \
+    just -f {{BASE_JUSTFILE}} {{BASE_CMD}}
+
+run MODEL:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    CONFIGS=$(just -f "{{THIS_JUSTFILE}}" _resolve_configs "{{MODEL}}")
+    just  -f "{{THIS_JUSTFILE}}" _run_base_cmd run-all {{MODEL}} bench "$CONFIGS"
+
+eval MODEL:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    CONFIGS=$(just  -f "{{THIS_JUSTFILE}}" _resolve_configs "{{MODEL}}")
+    just  -f "{{THIS_JUSTFILE}}" _run_base_cmd run-all {{MODEL}} eval "$CONFIGS"
+
+collect MODEL:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    CONFIGS=$(just  -f "{{THIS_JUSTFILE}}" _resolve_configs "{{MODEL}}")
+    just  -f "{{THIS_JUSTFILE}}" _run_base_cmd collect {{MODEL}} eval "$CONFIGS"
+
+collect-sheets MODEL:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    CONFIGS=$(just  -f "{{THIS_JUSTFILE}}" _resolve_configs "{{MODEL}}")
+    just  -f "{{THIS_JUSTFILE}}" _run_base_cmd collect-sheets {{MODEL}} eval "$CONFIGS"
+
+destroy MODEL:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    CONFIGS=$(just  -f "{{THIS_JUSTFILE}}" _resolve_configs "{{MODEL}}")
+    just  -f "{{THIS_JUSTFILE}}" _run_base_cmd destroy-all {{MODEL}} eval "$CONFIGS"
