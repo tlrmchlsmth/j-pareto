@@ -29,6 +29,7 @@ export POKER_IMAGE := env("POKER_IMAGE", "quay.io/tms/poker:0.0.13")
 export EXTRA_ARGS := env("EXTRA_ARGS", "")
 # Use aiter env
 export VLLM_ROCM_USE_AITER := env("VLLM_ROCM_USE_AITER", "")
+export VLLM_ROCM_QUICK_REDUCE_QUANTIZATION_VALS := env("VLLM_ROCM_QUICK_REDUCE_QUANTIZATION_VALS", "")
 
 # Sweep type can be eval or bench
 export SWEEP_TYPE := env("SWEEP_TYPE", "bench")
@@ -263,7 +264,9 @@ deploy CONFIG:
   ep = '$IS_EP' == 'yes'
   image_override = '{{IMAGE}}'
   aiter_override = '{{VLLM_ROCM_USE_AITER}}'
-  if ep or extra_args or image_override or aiter_override:
+  quant_override = '{{VLLM_ROCM_QUICK_REDUCE_QUANTIZATION_VALS}}'
+
+  if ep or extra_args or image_override or aiter_override or quant_override:
       with open('ms/values.yaml') as f:
           base = yaml.safe_load(f)
       for role in ('decode', 'prefill'):
@@ -293,6 +296,20 @@ deploy CONFIG:
                   # If it wasn't in the base values file, append it cleanly
                   if not found:
                       env_vars.append({'name': 'VLLM_ROCM_USE_AITER', 'value': str(aiter_override)})
+                  containers[0]['env'] = env_vars
+
+              # 4. Inject QUANT Env Var VLLM_ROCM_QUICK_REDUCE_QUANTIZATION_VALS
+              if quant_override:
+                  env_vars = containers[0].get('env', [])
+                  found = False
+                  for env in env_vars:
+                      if env.get('name') == 'VLLM_ROCM_QUICK_REDUCE_QUANTIZATION_VALS':
+                          env['value'] = str(quant_override)
+                          found = True
+                          break
+                  # If it wasn't in the base values file, append it cleanly
+                  if not found:
+                      env_vars.append({'name': 'VLLM_ROCM_QUICK_REDUCE_QUANTIZATION_VALS', 'value': str(quant_override)})
                   containers[0]['env'] = env_vars
 
               overlay.setdefault(role, {})['containers'] = containers
