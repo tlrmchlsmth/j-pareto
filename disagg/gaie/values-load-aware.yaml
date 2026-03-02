@@ -17,7 +17,6 @@ inferenceExtension:
       - type: prefill-header-handler
       - type: prefill-filter
       - type: decode-filter
-      - type: prefix-cache-scorer
       - type: active-request-scorer
       - type: queue-scorer
       - type: pd-profile-handler
@@ -29,8 +28,6 @@ inferenceExtension:
       - name: prefill
         plugins:
         - pluginRef: prefill-filter
-        - pluginRef: prefix-cache-scorer
-          weight: 3
         - pluginRef: active-request-scorer
           weight: 2
         - pluginRef: queue-scorer

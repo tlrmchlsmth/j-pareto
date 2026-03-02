@@ -1,0 +1,224 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: ${JOB_NAME}
+  labels:
+    app: pareto
+    pareto/config: ${CONFIG_NAME}
+spec:
+  backoffLimit: 2
+  ttlSecondsAfterFinished: 86400
+  template:
+    metadata:
+      labels:
+        app: pareto
+        pareto/config: ${CONFIG_NAME}
+    spec:
+      serviceAccountName: poker
+      restartPolicy: Never
+      tolerations:
+        - key: "amd.com/gpu"
+          operator: "Exists"
+          effect: "NoSchedule"
+        - key: "nvidia.com/gpu"
+          operator: "Exists"
+          effect: "NoSchedule"
+      containers:
+        - name: bench
+          image: ${POKER_IMAGE}
+          imagePullPolicy: Always
+          command: ["/bin/bash", "-c"]
+          args:
+            - |
+              set -euo pipefail
+
+              # Activate venv and install inference-perf
+              source /app/.venv/bin/activate
+              echo "Installing inference-perf..."
+              uv pip install inference-perf
+
+              # Hotfix: fix UserSessionCompletionAPIData.to_payload() signature
+              # (inference-perf 0.4.0 bug — parent class uses effective_model_name
+              #  but the child class still uses model_name)
+              IPERF_USER_SESSION=$(python3 -c "import inference_perf.apis.user_session as m; print(m.__file__)")
+              if grep -q 'model_name:' "$IPERF_USER_SESSION" 2>/dev/null; then
+                sed -i 's/async def to_payload(self, model_name:/async def to_payload(self, effective_model_name:/' "$IPERF_USER_SESSION"
+                sed -i 's/return await super().to_payload(model_name,/return await super().to_payload(effective_model_name,/' "$IPERF_USER_SESSION"
+                echo "Patched UserSessionCompletionAPIData.to_payload()"
+              else
+                echo "No patch needed"
+              fi
+
+              # Config from envsubst
+              CONFIG_NAME="${CONFIG_NAME}"
+              TARGET="${TARGET}"
+              NAMESPACE="${NAMESPACE}"
+              CONCURRENCY_LEVELS="${CONCURRENCY_LEVELS}"
+              NUM_WORKERS=${NUM_WORKERS}
+              NUM_REQUESTS=${NUM_REQUESTS}
+              NUM_GROUPS=${NUM_GROUPS}
+              NUM_PROMPTS_PER_GROUP=${NUM_PROMPTS_PER_GROUP}
+
+              # Build gateway URL
+              URL="http://infra-${TARGET}-inference-gateway-istio.${NAMESPACE}.svc.cluster.local"
+
+              # Detect model
+              echo "Detecting model from $CONFIG_NAME (guide=$TARGET)..."
+              MAX_WAIT=300
+              ELAPSED=0
+              MODEL=""
+              while [ -z "$MODEL" ] || [ "$MODEL" = "null" ]; do
+                RESP=$(curl -s "$URL/v1/models" 2>/dev/null || true)
+                MODEL=$(echo "$RESP" | jq -r '.data[0].id' 2>/dev/null || true)
+                if [ -n "$MODEL" ] && [ "$MODEL" != "null" ]; then
+                  break
+                fi
+                sleep 5
+                ELAPSED=$((ELAPSED + 5))
+                if [ $ELAPSED -ge $MAX_WAIT ]; then
+                  echo "ERROR: Could not detect model from $CONFIG_NAME after ${MAX_WAIT}s"
+                  exit 1
+                fi
+                if [ $((ELAPSED % 30)) -eq 0 ]; then
+                  echo "  waiting for gateway... ${ELAPSED}s"
+                fi
+              done
+              echo "Model: $MODEL"
+
+              # Detect GPU count
+              GPU_COUNT=$(kubectl get pods -n "$NAMESPACE" \
+                -l "llm-d.ai/guide=${TARGET},llm-d.ai/inference-serving=true" \
+                -o json | jq '[.items[].spec.containers[].resources.limits | (.["nvidia.com/gpu"] // .["amd.com/gpu"] // empty) | tonumber] | add')
+              if [ -z "$GPU_COUNT" ] || [ "$GPU_COUNT" = "null" ]; then
+                echo "WARNING: Could not detect GPU count for $CONFIG_NAME, defaulting to 0"
+                GPU_COUNT=0
+              fi
+              echo "GPU count: $GPU_COUNT"
+
+              echo "SWEEP_START"
+              echo "CONFIG: target=$CONFIG_NAME model=$MODEL gpu_count=$GPU_COUNT"
+              echo "CONCURRENCY_LEVELS: $CONCURRENCY_LEVELS"
+
+              for MC in $CONCURRENCY_LEVELS; do
+                echo ""
+                echo "BENCH_RUN: concurrency=$MC num_requests=$NUM_REQUESTS"
+
+                # Generate inference-perf config
+                cat > /tmp/config.yml <<CFGEOF
+              load:
+                type: concurrent
+                num_workers: $NUM_WORKERS
+                worker_max_concurrency: $MC
+                stages:
+                - concurrency_level: $MC
+                  num_requests: $NUM_REQUESTS
+                request_timeout: 900.0
+              api:
+                type: completion
+                streaming: true
+              server:
+                type: vllm
+                model_name: "$MODEL"
+                base_url: "$URL"
+                ignore_eos: true
+              tokenizer:
+                pretrained_model_name_or_path: $MODEL
+              data:
+                type: shared_prefix
+                shared_prefix:
+                  system_prompt_len: 4096
+                  question_len: 256
+                  output_len: 256
+                  num_groups: $NUM_GROUPS
+                  num_prompts_per_group: $NUM_PROMPTS_PER_GROUP
+                  enable_multi_turn_chat: true
+              report:
+                request_lifecycle:
+                  summary: true
+                  per_stage: true
+                  per_request: true
+              CFGEOF
+
+                echo "Running inference-perf with concurrency=$MC..."
+                inference-perf --config_file /tmp/config.yml 2>&1 | tee /tmp/iperf_output.txt
+
+                # Parse inference-perf JSON summary and emit structured logs
+                python3 -c "
+              import json, glob, os
+
+              # Find the most recent report directory (inference-perf writes to reports-YYYYMMDD-HHMMSS/)
+              report_dirs = sorted(glob.glob('reports-*'), key=os.path.getmtime, reverse=True)
+
+              summary = None
+              for d in report_dirs:
+                  # Look for summary_lifecycle_metrics.json
+                  summary_path = os.path.join(d, 'summary_lifecycle_metrics.json')
+                  if os.path.exists(summary_path):
+                      with open(summary_path) as fh:
+                          summary = json.load(fh)
+                      break
+                  # Fallback: any file with 'summary' in the name
+                  for root, dirs, files in os.walk(d):
+                      for f in files:
+                          if 'summary' in f and f.endswith('.json'):
+                              with open(os.path.join(root, f)) as fh:
+                                  summary = json.load(fh)
+                              break
+                      if summary:
+                          break
+                  if summary:
+                      break
+
+              if not summary:
+                  print('WARNING: Could not find inference-perf summary JSON')
+                  # List what files exist for debugging
+                  for d in report_dirs[:3]:
+                      for root, dirs, files in os.walk(d):
+                          for f in files:
+                              print(f'  Found: {os.path.join(root, f)}')
+              else:
+                  # inference-perf summary format:
+                  # {successes: {throughput: {output_tokens_per_sec, ...}, latency: {time_to_first_token: {mean, median, p99}, ...}}}
+                  successes = summary.get('successes', {})
+                  tp = successes.get('throughput', {})
+                  latency = successes.get('latency', {})
+
+                  output_tp = tp.get('output_tokens_per_sec', 0)
+                  total_tp = tp.get('total_tokens_per_sec', 0)
+
+                  # Latencies are in seconds, convert to ms
+                  ttft = latency.get('time_to_first_token', {}) or {}
+                  tpot = latency.get('time_per_output_token', {}) or {}
+                  itl = latency.get('inter_token_latency', {}) or {}
+
+                  print(f'Output token throughput (tok/s): {output_tp:.2f}')
+                  print(f'Total Token throughput (tok/s): {total_tp:.2f}')
+                  print(f'Mean TTFT (ms): {ttft.get(\"mean\", 0) * 1000:.2f}')
+                  print(f'Median TTFT (ms): {ttft.get(\"median\", 0) * 1000:.2f}')
+                  print(f'P99 TTFT (ms): {ttft.get(\"p99\", 0) * 1000:.2f}')
+                  print(f'Mean TPOT (ms): {tpot.get(\"mean\", 0) * 1000:.2f}')
+                  print(f'Median TPOT (ms): {tpot.get(\"median\", 0) * 1000:.2f}')
+                  print(f'P99 TPOT (ms): {tpot.get(\"p99\", 0) * 1000:.2f}')
+                  print(f'Mean ITL (ms): {itl.get(\"mean\", 0) * 1000:.2f}')
+                  print(f'Median ITL (ms): {itl.get(\"median\", 0) * 1000:.2f}')
+                  print(f'P99 ITL (ms): {itl.get(\"p99\", 0) * 1000:.2f}')
+              "
+                echo "BENCH_RUN_END: concurrency=$MC"
+              done
+
+              echo ""
+              echo "SWEEP_END"
+          env:
+            - name: HF_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: hf-secret
+                  key: HF_TOKEN
+                  optional: true
+          resources:
+            requests:
+              cpu: "2"
+              memory: 4Gi
+            limits:
+              cpu: "4"
+              memory: 8Gi

@@ -1,0 +1,11 @@
+# 16 GPU disaggregated: 8 prefill (TP=1) + 4 decode (TP=2), KV-aware routing
+# Base: disagg
+expert_parallel: false
+decode:
+  parallelism:
+    tensor: 2
+  replicas: 4
+prefill:
+  parallelism:
+    tensor: 1
+  replicas: 8

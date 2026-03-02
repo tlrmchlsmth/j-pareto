@@ -16,6 +16,7 @@ environments:
 {{- $msValues := env "MS_VALUES" -}}
 {{- $decodeTp := env "DECODE_TP" | default "" -}}
 {{- $prefillTp := env "PREFILL_TP" | default "" -}}
+{{- $gaieValues := env "GAIE_VALUES" | default "gaie/values.yaml" -}}
 {{- $config := env "CONFIG" | default "default" -}}
 
 repositories:
@@ -45,7 +46,7 @@ releases:
     needs:
       - {{ printf "infra-%s" $rn | quote }}
     values:
-      - gaie/values.yaml
+      - {{ $gaieValues }}
     {{- if or (eq .Environment.Name "istio") (eq .Environment.Name "default") }}
       - provider:
           name: {{ .Environment.Values.provider.name }}

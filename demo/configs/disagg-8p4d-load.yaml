@@ -1,0 +1,12 @@
+# 16 GPU disaggregated: 8 prefill (TP=1) + 4 decode (TP=2), load-aware routing
+# Base: disagg
+expert_parallel: false
+gaie_values: gaie/values-load-aware.yaml
+decode:
+  parallelism:
+    tensor: 2
+  replicas: 4
+prefill:
+  parallelism:
+    tensor: 1
+  replicas: 8

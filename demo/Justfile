@@ -1,0 +1,451 @@
+set dotenv-load
+set dotenv-path := "../.env"
+
+
+# Avoid users overlapping
+export NSP := env("NSP", env("USER", "anon"))
+
+# Configs to sweep (space-separated). Each name maps to configs/<name>.yaml.
+# Prefix determines base template: agg-* → agg, disagg-* → disagg.
+export CONFIGS := env("CONFIGS", "agg-tp2-12r disagg-8p4d-random disagg-8p4d-load disagg-8p4d-kv")
+#export CONFIGS := env("CONFIGS", "agg-tp2-12r disagg-8p4d-load ")
+
+# Max GPUs to use concurrently (configs are scheduled to fit within this budget)
+export MAX_GPUS := env("MAX_GPUS", "48")
+
+# Model to deploy
+export MODEL := env("MODEL", "openai/gpt-oss-120b")
+# vllm image to use
+export IMAGE := env("IMAGE", "ghcr.io/vcave/llm-d/llm-d-rocm:vllm_700_qk_triton_aiter_uni_attn_fix_23c8e6822")
+
+# Inference-perf sweep configuration
+export CONCURRENCIES := env("CONCURRENCIES", "64 80 96 112 128 160 192 224 256 320 384 448 512")
+export NUM_WORKERS := env("NUM_WORKERS", "128")
+export NUM_REQUESTS := env("NUM_REQUESTS", "500")
+export NUM_GROUPS := env("NUM_GROUPS", "50")
+export NUM_PROMPTS_PER_GROUP := env("NUM_PROMPTS_PER_GROUP", "10")
+export POKER_IMAGE := env("POKER_IMAGE", "quay.io/tms/poker:0.0.13")
+
+# Extra vLLM args to inject into all model server containers (space-separated)
+export EXTRA_ARGS := env("EXTRA_ARGS", "--attention-backend ROCM_AITER_UNIFIED_ATTN")
+# Use aiter env
+export VLLM_ROCM_USE_AITER := env("VLLM_ROCM_USE_AITER", "")
+
+default:
+  just --list
+
+# --- Utils ---
+
+# Prepends NSP to a config; no-op if already prefixed.
+_build_ns CONFIG:
+  @case "{{CONFIG}}" in \
+      {{NSP}}-*) echo "{{CONFIG}}" ;; \
+      *) echo "{{NSP}}-{{CONFIG}}" ;; \
+  esac
+
+_is_ep_cfg CONFIG:
+  #!/usr/bin/env bash
+  python -c "
+  import yaml
+  with open('configs/{{CONFIG}}.yaml') as f:
+      d = yaml.safe_load(f)
+  print('yes' if d.get('expert_parallel', False) else 'no')
+  "
+
+# --- Full lifecycle ---
+
+# Deploy a config (nonblocking — use `just wait-ready` to block until pods are up)
+up CONFIG:
+  just setup-ns "{{CONFIG}}"
+  just deploy "{{CONFIG}}"
+
+# Start a poker pod in a config's namespace
+start-poker CONFIG:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  NS=$(just _build_ns {{CONFIG}})
+  kubectl -n "$NS" apply -f ../poker/poker.yaml
+  echo "Waiting for poker pod in $NS..."
+  kubectl -n "$NS" wait --for=condition=ready pod/poker --timeout=5m
+  echo "Poker pod ready. Run: just poke {{CONFIG}}"
+
+# Get an interactive shell in a config's poker pod
+poke CONFIG:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  NS=$(just _build_ns {{CONFIG}})
+  kubectl -n "$NS" exec -it poker -- bash
+
+# Run a single config end-to-end: deploy → wait → sweep → wait → teardown
+run CONFIG:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  echo "=== Running config: {{CONFIG}} ==="
+  just setup-ns "{{CONFIG}}"
+  just deploy "{{CONFIG}}"
+  just wait-ready "{{CONFIG}}"
+  just sweep "{{CONFIG}}"
+  just wait-sweep "{{CONFIG}}"
+  just teardown "{{CONFIG}}"
+  echo "=== Config {{CONFIG}} complete ==="
+
+# Compute GPU count for a config from its YAML file
+gpu-count CONFIG:
+  #!/usr/bin/env bash
+  python -c "
+  import yaml, sys
+  with open('configs/{{CONFIG}}.yaml') as f:
+      d = yaml.safe_load(f)
+  gpus = 0
+  for role in ('decode', 'prefill'):
+      if role in d:
+          tp = d[role].get('parallelism', {}).get('tensor', 1)
+          dp = d[role].get('parallelism', {}).get('data', 1)
+          replicas = d[role].get('replicas', 1)
+          gpus += tp * dp * replicas
+  print(gpus)
+  "
+
+# Run all configs, scheduling by GPU budget
+run-all:
+  #!/usr/bin/env zsh
+  set -euo pipefail
+  MAX={{MAX_GPUS}}
+  CONFIGS=({{CONFIGS}})
+  TOTAL=${#CONFIGS[@]}
+
+  # Compute GPU counts upfront
+  typeset -A GPU_COST
+  for CFG in "${CONFIGS[@]}"; do
+    GPU_COST[$CFG]=$(just gpu-count "$CFG")
+  done
+
+  echo "Running $TOTAL configs (max $MAX GPUs concurrently)"
+  for CFG in "${CONFIGS[@]}"; do
+    echo "  $CFG: ${GPU_COST[$CFG]} GPUs"
+  done
+  echo ""
+
+  # GPU-budget scheduler
+  typeset -A PID_CFG   # pid -> config name
+  USED=0
+  QUEUE=("${CONFIGS[@]}")
+  FAILED=0
+
+  # Kill all background processes on Ctrl-C / exit
+  cleanup() {
+    echo ""
+    echo "Caught signal, killing running configs..."
+    trap - INT TERM          # reset to default so kill 0 doesn't re-enter
+    echo "Running deployments may still be up — use 'just teardown-all' to clean up."
+    kill 0                   # kill entire process group (script + all children)
+  }
+  trap cleanup INT TERM
+
+  while (( ${#QUEUE[@]} > 0 )) || (( ${#PID_CFG[@]} > 0 )); do
+    # Launch configs that fit within budget (scan entire queue, not just head)
+    LAUNCHED=true
+    while $LAUNCHED && (( ${#QUEUE[@]} > 0 )); do
+      LAUNCHED=false
+      for (( I=1; I<=${#QUEUE[@]}; I++ )); do
+        NEXT="${QUEUE[$I]}"
+        NEED=${GPU_COST[$NEXT]}
+        if (( USED + NEED <= MAX )); then
+          echo ">>> Launching $NEXT (${NEED} GPUs, $((USED+NEED))/${MAX} used)"
+          (just run "$NEXT" 2>&1 | awk -v c="$NEXT" '{print "["c"] "$0; fflush()}') &
+          PID_CFG[$!]=$NEXT
+          USED=$((USED + NEED))
+          QUEUE[$I]=()
+          LAUNCHED=true
+          break
+        fi
+      done
+    done
+
+    # Wait for any running config to finish
+    if (( ${#PID_CFG[@]} > 0 )); then
+      while true; do
+        for PID in "${(@k)PID_CFG}"; do
+          if ! kill -0 "$PID" 2>/dev/null; then
+            wait "$PID" || FAILED=$((FAILED + 1))
+            CFG="${PID_CFG[$PID]}"
+            COST=${GPU_COST[$CFG]}
+            USED=$((USED - COST))
+            unset "PID_CFG[$PID]"
+            echo "<<< $CFG finished (freed ${COST} GPUs, ${USED}/${MAX} used)"
+            break 2
+          fi
+        done
+        sleep 5
+      done
+    fi
+  done
+
+  if (( FAILED > 0 )); then
+    echo "WARNING: $FAILED config(s) failed"
+  fi
+  echo ""
+  echo "=== All configs complete ==="
+  just collect
+
+# --- Namespace setup ---
+
+# Create namespace with secrets and poker RBAC for a config
+setup-ns CONFIG:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  NS=$(just _build_ns {{CONFIG}})
+  echo "Setting up namespace: $NS"
+  kubectl create ns "$NS" --dry-run=client -o yaml | kubectl apply -f -
+  # HF secret
+  kubectl -n "$NS" create secret generic hf-secret \
+    --from-literal=HF_TOKEN="$HF_TOKEN" \
+    --dry-run=client -o yaml | kubectl apply -f -
+  # Poker RBAC (SA + Role + RoleBinding, skip the Pod)
+  kubectl -n "$NS" apply -f - <<'EOF'
+  apiVersion: v1
+  kind: ServiceAccount
+  metadata:
+    name: poker
+  ---
+  apiVersion: rbac.authorization.k8s.io/v1
+  kind: Role
+  metadata:
+    name: poker
+  rules:
+    - apiGroups: [""]
+      resources: ["pods"]
+      verbs: ["get", "list"]
+    - apiGroups: ["gateway.networking.k8s.io"]
+      resources: ["gateways"]
+      verbs: ["get", "list"]
+  ---
+  apiVersion: rbac.authorization.k8s.io/v1
+  kind: RoleBinding
+  metadata:
+    name: poker
+  roleRef:
+    apiGroup: rbac.authorization.k8s.io
+    kind: Role
+    name: poker
+  subjects:
+    - kind: ServiceAccount
+      name: poker
+  EOF
+
+# --- Deploy / Teardown ---
+
+# Deploy a config's model servers
+deploy CONFIG:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  NS=$(just _build_ns {{CONFIG}})
+  if [[ "{{CONFIG}}" == disagg-* ]]; then
+    BASE=disagg
+  else
+    BASE=agg
+  fi
+  IS_EP=$(just _is_ep_cfg {{CONFIG}})
+  # Read optional gaie_values from config YAML
+  GAIE_VALUES=$(python -c "
+  import yaml
+  with open('configs/{{CONFIG}}.yaml') as f:
+      d = yaml.safe_load(f)
+  print(d.get('gaie_values', ''))
+  ")
+  # Build overlay: strip non-helm keys, inject EP flag + EXTRA_ARGS into containers
+  MS_VALUES=$(mktemp)
+  HF_CACHE=$(mktemp -d)
+  trap "rm -f $MS_VALUES; rm -rf $HF_CACHE" EXIT
+  echo "Deploying $NS (base=$BASE, ep=${IS_EP}, gaie_values=${GAIE_VALUES:-default})"
+  cd "../$BASE"
+  python -c "
+  import yaml, shlex, copy
+  with open('../demo/configs/{{CONFIG}}.yaml') as f:
+      overlay = yaml.safe_load(f)
+  overlay.pop('expert_parallel', None)
+  overlay.pop('gaie_values', None)
+  extra_args = shlex.split('{{EXTRA_ARGS}}')
+  ep = '$IS_EP' == 'yes'
+  image_override = '{{IMAGE}}'
+  aiter_override = '{{VLLM_ROCM_USE_AITER}}'
+  if ep or extra_args or image_override or aiter_override:
+      with open('ms/values.yaml') as f:
+          base = yaml.safe_load(f)
+      for role in ('decode', 'prefill'):
+          base_role = base.get(role, {})
+          if base_role.get('containers') or base_role.get('create', False):
+              containers = copy.deepcopy(base_role.get('containers', [{}]))
+              # 1. set args
+              args = list(containers[0].get('args', []))
+              if ep:
+                  args.append('--enable-expert-parallel')
+              args.extend(extra_args)
+              containers[0]['args'] = args
+
+              # 2. Inject Image
+              if image_override:
+                  containers[0]['image'] = image_override
+
+              # 3. Inject AITER Env Var
+              if aiter_override:
+                  env_vars = containers[0].get('env', [])
+                  found = False
+                  for env in env_vars:
+                      if env.get('name') == 'VLLM_ROCM_USE_AITER':
+                          env['value'] = str(aiter_override)
+                          found = True
+                          break
+                  # If it wasn't in the base values file, append it cleanly
+                  if not found:
+                      env_vars.append({'name': 'VLLM_ROCM_USE_AITER', 'value': str(aiter_override)})
+                  containers[0]['env'] = env_vars
+
+              overlay.setdefault(role, {})['containers'] = containers
+  with open('$MS_VALUES', 'w') as f:
+      yaml.dump(overlay, f, default_flow_style=False)
+  "
+  DECODE_TP=$(python -c "import yaml; d=yaml.safe_load(open('../demo/configs/{{CONFIG}}.yaml')); print(d.get('decode',{}).get('parallelism',{}).get('tensor',8))")
+  PREFILL_TP=$(python -c "import yaml; d=yaml.safe_load(open('../demo/configs/{{CONFIG}}.yaml')); print(d.get('prefill',{}).get('parallelism',{}).get('tensor',4))")
+  if [[ "{{CONFIG}}" == disagg-* ]]; then
+    CONFIG="{{CONFIG}}" DECODE_TP="$DECODE_TP" PREFILL_TP="$PREFILL_TP" python scripts/gen-nic-values.py
+  fi
+  HELMFILE_CACHE_HOME="$HF_CACHE" MODEL="{{MODEL}}" MS_VALUES="$MS_VALUES" DECODE_TP="$DECODE_TP" PREFILL_TP="$PREFILL_TP" CONFIG="{{CONFIG}}" GAIE_VALUES="$GAIE_VALUES" helmfile apply -n "$NS"
+  kubectl -n "$NS" apply -f httproute.yaml
+
+# Wait for model server pods to be ready
+wait-ready CONFIG:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  NS=$(just _build_ns {{CONFIG}})
+  if [[ "{{CONFIG}}" == disagg-* ]]; then
+    GUIDE=disagg
+  else
+    GUIDE=agg
+  fi
+  echo "Waiting for model servers in $NS..."
+  # Wait for at least one pod to exist
+  while [ "$(kubectl -n "$NS" get pods -l "llm-d.ai/guide=$GUIDE,llm-d.ai/inference-serving=true" -o name 2>/dev/null | wc -l)" -eq 0 ]; do
+    sleep 10
+  done
+  kubectl -n "$NS" wait --for=condition=ready pods \
+    -l "llm-d.ai/guide=$GUIDE,llm-d.ai/inference-serving=true" \
+    --timeout=30m
+  echo "Model servers ready in $NS"
+
+# Tear down model servers (keeps namespace + sweep job pods for log collection)
+teardown CONFIG:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  NS=$(just _build_ns {{CONFIG}})
+  if [[ "{{CONFIG}}" == disagg-* ]]; then
+    BASE=disagg
+  else
+    BASE=agg
+  fi
+  echo "Tearing down model servers in $NS {{CONFIG}}"
+  cd "../$BASE"
+  helmfile destroy -n "$NS" || true
+  kubectl -n "$NS" delete -f httproute.yaml --ignore-not-found=true 2>/dev/null || true
+
+# --- Sweep ---
+
+# Launch sweep job for a config (model servers must already be running)
+sweep CONFIG:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  NS=$(just _build_ns {{CONFIG}})
+  if [[ "{{CONFIG}}" == disagg-* ]]; then
+    TARGET=disagg
+  else
+    TARGET=agg
+  fi
+  echo "Launching sweep job for {{CONFIG}} in namespace $NS"
+  env \
+    JOB_NAME="demo-{{CONFIG}}" \
+    CONFIG_NAME="{{CONFIG}}" \
+    TARGET="$TARGET" \
+    NAMESPACE="$NS" \
+    CONCURRENCY_LEVELS="{{CONCURRENCIES}}" \
+    NUM_WORKERS={{NUM_WORKERS}} \
+    NUM_REQUESTS={{NUM_REQUESTS}} \
+    NUM_GROUPS={{NUM_GROUPS}} \
+    NUM_PROMPTS_PER_GROUP={{NUM_PROMPTS_PER_GROUP}} \
+    POKER_IMAGE="{{POKER_IMAGE}}" \
+    envsubst '${JOB_NAME} ${CONFIG_NAME} ${TARGET} ${NAMESPACE} ${CONCURRENCY_LEVELS} ${NUM_WORKERS} ${NUM_REQUESTS} ${NUM_GROUPS} ${NUM_PROMPTS_PER_GROUP} ${POKER_IMAGE}' \
+      < job.yaml | kubectl -n "$NS" replace --force -f -
+
+# Wait for a config's sweep job to complete
+wait-sweep CONFIG:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  NS=$(just _build_ns {{CONFIG}})
+  echo "Waiting for sweep job in $NS..."
+  kubectl -n "$NS" wait --for=condition=complete --timeout=3h \
+    "job/demo-{{CONFIG}}" || \
+    echo "WARNING: sweep job for {{CONFIG}} did not complete successfully"
+
+# --- Results ---
+
+# Collect results from all config namespaces
+collect:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  NAMESPACES=""
+  for CFG in {{CONFIGS}}; do
+    NS=$(just _build_ns ${CFG})
+    NAMESPACES="$NAMESPACES -n $NS"
+  done
+  python collect.py $NAMESPACES
+
+# Collect results and upload to Google Sheets
+collect-sheets TITLE="":
+  #!/usr/bin/env bash
+  set -euo pipefail
+  TITLE="{{TITLE}}"
+  if [[ -z "$TITLE" ]]; then
+    TITLE="$(basename '{{MODEL}}') Scale-Up Demo {{IMAGE}} {{EXTRA_ARGS}}"
+  fi
+  NAMESPACES=""
+  for CFG in {{CONFIGS}}; do
+    NS=$(just _build_ns ${CFG})
+    NAMESPACES="$NAMESPACES -n $NS"
+  done
+  python collect.py $NAMESPACES --sheets "$TITLE"
+
+# --- Status & Cleanup ---
+
+# Show status across all config namespaces
+status:
+  #!/usr/bin/env bash
+  for CFG in {{CONFIGS}}; do
+    NS=$(just _build_ns ${CFG})
+    echo "=== $NS ==="
+    kubectl -n "$NS" get jobs -l app=pareto 2>/dev/null || echo "  (namespace not found)"
+    kubectl -n "$NS" get pods -l llm-d.ai/inference-serving=true --no-headers 2>/dev/null || true
+    echo ""
+  done
+
+# Delete sweep jobs across all namespaces (keeps model servers)
+clean:
+  #!/usr/bin/env bash
+  for CFG in {{CONFIGS}}; do
+    NS=$(just _build_ns ${CFG})
+    kubectl -n "$NS" delete jobs -l app=pareto --ignore-not-found=true 2>/dev/null || true
+  done
+
+# Tear down model servers in all namespaces
+teardown-all:
+  #!/usr/bin/env bash
+  for CFG in {{CONFIGS}}; do
+    just teardown "$CFG" || true
+  done
+
+# Delete all config namespaces entirely
+destroy-all:
+  #!/usr/bin/env bash
+  for CFG in {{CONFIGS}}; do
+    NS=$(just _build_ns ${CFG})
+    echo "Deleting namespace $NS"
+    kubectl delete ns "$NS" --ignore-not-found=true 2>/dev/null || true
+  done

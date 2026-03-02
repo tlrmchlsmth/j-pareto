@@ -1,0 +1,7 @@
+# 24 GPU aggregated: TP=2, 12 replicas (3 nodes)
+# Base: agg
+expert_parallel: false
+decode:
+  parallelism:
+    tensor: 2
+  replicas: 12
