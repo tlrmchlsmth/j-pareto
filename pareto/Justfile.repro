@@ -34,10 +34,11 @@ BASE_JUSTFILE := "./Justfile"
 # Avoid users overlapping
 export NSP := env("NSP", env("USER", "anon"))
 
+
 # Run args
-IMAGE := "ghcr.io/vcave/llm-d/llm-d-rocm:vllm_700_v0151_qk_triton_attn_fix_23c8e6822"
-EXTRA_ARGS := "--attention-backend TRITON_ATTN"
-VLLM_ROCM_USE_AITER := "1"
+IMAGE := "ghcr.io/vcave/llm-d/llm-d-rocm:vllm_700_qk_triton_aiter_uni_attn_fix_23c8e6822"
+EXTRA_ARGS := "--attention-backend ROCM_AITER_UNIFIED_ATTN"
+VLLM_ROCM_USE_AITER := "0"
 
 LLAMA_CONFIGS := env("CONFIGS", "agg-tp1 agg-tp2 agg-tp4 agg-tp8 disagg-3p-tp1-1d-tp2")
 GPTOSS_CONFIGS := env("CONFIGS", "agg-tp1 agg-tp2 agg-tp4 agg-tp8 disagg-3p-tp1-1d-tp2 disagg-2p-tp1-1d-tp2")
