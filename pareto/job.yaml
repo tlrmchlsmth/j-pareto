@@ -149,41 +149,33 @@ spec:
                 for MC in $CONCURRENCY_LEVELS; do
                   echo ""
 
-                  # Check if MC is high enough to skip calibration
-                  if [ "$MC" -gt 100 ]; then
-                      # For high MC the system is generally faster. it is not worth it to run
-                      # a calibration run.
-                      echo "SKIPPING CALIBRATION: MC=$MC is > 100"
-                      NP=$MC
-                      THROUGHPUT="skipped"
-                  else
-                    # Calibration: small run to estimate throughput
-                    CALIB_N=$((MC > 20 ? MC : 20))
-                    echo "CALIBRATION: concurrency=$MC num_prompts=$CALIB_N"
-                    CALIB_OUTPUT=$(vllm bench serve \
-                      --base-url "$URL" \
-                      --model "$MODEL" \
-                      --dataset-name random \
-                      --random-input-len $ISL \
-                      --random-output-len $OSL \
-                      --max-concurrency $MC \
-                      --num-prompts $CALIB_N \
-                      --ignore-eos \
-                      --request-rate 4096 \
-                      --seed $(date +%M%H%M%S) 2>&1)
-                    echo "$CALIB_OUTPUT"
+                  # Calibration: small run to estimate throughput
+                  CALIB_N=$((MC > 20 ? MC : 20))
+                  echo "CALIBRATION: concurrency=$MC num_prompts=$CALIB_N"
+                  CALIB_OUTPUT=$(vllm bench serve \
+                    --base-url "$URL" \
+                    --model "$MODEL" \
+                    --dataset-name random \
+                    --random-input-len $ISL \
+                    --random-output-len $OSL \
+                    --max-concurrency $MC \
+                    --num-prompts $CALIB_N \
+                    --ignore-eos \
+                    --request-rate 4096 \
+                    --seed $(date +%M%H%M%S) 2>&1)
+                  echo "$CALIB_OUTPUT"
 
-                    # Compute num_prompts for target duration
-                    THROUGHPUT=$(echo "$CALIB_OUTPUT" | grep -i "Total Token throughput" | grep -oE '[0-9]+\.[0-9]+' | tail -1)
-                    TOKENS_PER_REQ=$((ISL + OSL))
-                    if [ -n "${THROUGHPUT:-}" ]; then
-                      NP=$(python3 -c "import math; r=float('$THROUGHPUT')/$TOKENS_PER_REQ; print(max($MIN_PROMPTS, math.ceil(r * $TARGET_DURATION)))")
-                    else
-                      NP=$MIN_PROMPTS
-                    fi
-                    # Just make sure that we execute atleast MC requests !
-                    NP=$(( $NP > $MC ? $NP : $MC ))
+                  # Compute num_prompts for target duration
+                  THROUGHPUT=$(echo "$CALIB_OUTPUT" | grep -i "Total Token throughput" | grep -oE '[0-9]+\.[0-9]+' | tail -1)
+                  TOKENS_PER_REQ=$((ISL + OSL))
+                  if [ -n "${THROUGHPUT:-}" ]; then
+                    NP=$(python3 -c "import math; r=float('$THROUGHPUT')/$TOKENS_PER_REQ; print(max($MIN_PROMPTS, math.ceil(r * $TARGET_DURATION)))")
+                  else
+                    NP=$MIN_PROMPTS
                   fi
+                  # Ensure NP is at least 2 times MC so there is a chance to reach MC
+                  MIN_NP=$(( MC * 2 ))
+                  NP=$(( NP > MIN_NP ? NP : MIN_NP ))
 
                   echo "COMPUTED_NUM_PROMPTS: $NP (throughput=${THROUGHPUT:-n/a} tok/s)"
 
