@@ -173,6 +173,8 @@ spec:
                   else
                     NP=$MIN_PROMPTS
                   fi
+                  # Just make sure that we execute atleast MC requests !
+                  NP=$(( $NP > $MC ? $NP : $MC ))
                   echo "COMPUTED_NUM_PROMPTS: $NP (throughput=${THROUGHPUT:-n/a} tok/s)"
 
                   # Main benchmark run
