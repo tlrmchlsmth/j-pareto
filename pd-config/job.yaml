@@ -61,6 +61,8 @@ spec:
               echo "CONFIG: model=${MODEL} tp=${TP} dp=${DP} gpu_count=${GPU_COUNT} ep=${ENABLE_EP} workload=${WORKLOAD_TYPE} isl=${ISL} osl=${OSL}"
               echo "TARGET_DURATION: ${TARGET_DURATION}s  MIN_PROMPTS: ${MIN_PROMPTS}"
               echo "CONCURRENCY_LEVELS: ${CONCURRENCY_LEVELS}"
+              echo "VLLM_ROCM_USE_AITER: ${VLLM_ROCM_USE_AITER}"
+              echo "VLLM_ROCM_QUICK_REDUCE_QUANTIZATION: ${VLLM_ROCM_QUICK_REDUCE_QUANTIZATION}"
 
               # Configure decode specialization: DecodeBenchConnector fills KV cache
               # with dummy values so decode runs against a realistic ISL without
@@ -211,6 +213,8 @@ spec:
               value: INFO
             - name: VLLM_ROCM_USE_AITER
               value: "${VLLM_ROCM_USE_AITER}"
+            - name: VLLM_ROCM_QUICK_REDUCE_QUANTIZATION
+              value: "${VLLM_ROCM_QUICK_REDUCE_QUANTIZATION}"
             - name: AITER_JIT_DIR
               value: "/aiter-cache"
             # Aiter compilation env vars

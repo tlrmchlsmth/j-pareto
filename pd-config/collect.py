@@ -15,6 +15,7 @@ import csv
 import json
 import math
 import re
+import os
 import subprocess
 import sys
 import time
@@ -204,6 +205,25 @@ def get_bench_pods(namespace: str) -> list[dict]:
     data = json.loads(result.stdout)
     return data.get("items", [])
 
+def save_logs_to_disk(all_logs: dict[str, str], output_dir: str):
+    """Saves the gathered log contents to local .log files."""
+    if not all_logs:
+        print("No logs found to save.")
+        return
+
+    # Create the directory if it doesn't exist
+    if not os.path.exists(output_dir):
+        os.makedirs(output_dir)
+        print(f"Created directory: {output_dir}")
+
+    for filename, content in all_logs.items():
+        # Ensure filename is safe and construct full path
+        safe_filename = os.path.basename(filename)
+        file_path = os.path.join(output_dir, safe_filename)
+
+        with open(file_path, "w", encoding="utf-8") as f:
+            f.write(content)
+        print(f"  Saved: {file_path}")
 
 def collect_from_pods(namespace: str) -> dict[str, str]:
     """Read logs from all pd-config-bench pods via kubectl logs.
@@ -1096,6 +1116,9 @@ def main():
     if not all_results:
         print("\nNo benchmark results parsed from logs", file=sys.stderr)
         sys.exit(1)
+
+    print(f"Saving {len(all_logs)} log files to '{args.output_dir}'...")
+    save_logs_to_disk(all_logs, args.output_dir)
 
     for wt in ["prefill", "decode", "aggregated"]:
         wt_results = [r for r in all_results if r.workload_type == wt]
