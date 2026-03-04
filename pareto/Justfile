@@ -20,7 +20,7 @@ export IMAGE := env("IMAGE", "ghcr.io/vcave/llm-d/llm-d-rocm:v0.4.7-debug")
 # Sweep configuration
 export ISL := env("ISL", "4096")
 export OSL := env("OSL", "256")
-export CONCURRENCIES := env("CONCURRENCIES", "4 8 12 16 20 24 28 32 40 48 56 64 80 96 112 128")
+export CONCURRENCIES := env("CONCURRENCIES", "4 8 12 16 20 24 28 32 40 48 56 64 80 96 112 128 192 256 384 512")
 export TARGET_DURATION := env("TARGET_DURATION", "60")
 export MIN_PROMPTS := env("MIN_PROMPTS", "100")
 export POKER_IMAGE := env("POKER_IMAGE", "quay.io/tms/poker:0.0.13")

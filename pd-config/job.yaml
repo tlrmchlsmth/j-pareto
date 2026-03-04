@@ -220,6 +220,12 @@ spec:
               value: "gfx942"
             - name: MAX_JOBS
               value: "64"
+            - name: HF_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: hf-secret
+                  key: HF_TOKEN
+                  optional: true
           volumeMounts:
             - name: shm
               mountPath: /dev/shm
