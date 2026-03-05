@@ -25,6 +25,7 @@ export CONCURRENCIES := env("CONCURRENCIES", "4 8 12 16 20 24 28 32 40 48 56 64 
 export TARGET_DURATION := env("TARGET_DURATION", "60")
 export MIN_PROMPTS := env("MIN_PROMPTS", "200")
 export POKER_IMAGE := env("POKER_IMAGE", "quay.io/tms/poker:0.0.13")
+export FORCE_GPU_NIC_AFFINITY := env("FORCE_GPU_NIC_AFFINITY", "yes")
 
 # Extra vLLM args to inject into all model server containers (space-separated)
 export EXTRA_ARGS := env("EXTRA_ARGS", "")
@@ -322,10 +323,21 @@ deploy CONFIG:
   "
   DECODE_TP=$(python3 -c "import yaml; d=yaml.safe_load(open('../pareto/configs/{{CONFIG}}.yaml')); print(d.get('decode',{}).get('parallelism',{}).get('tensor',8))")
   PREFILL_TP=$(python3 -c "import yaml; d=yaml.safe_load(open('../pareto/configs/{{CONFIG}}.yaml')); print(d.get('prefill',{}).get('parallelism',{}).get('tensor',4))")
+  PREFILL_TP_RESOURCES=$PREFILL_TP
+  DECODE_TP_RESOURCES=$DECODE_TP
   if [[ "{{CONFIG}}" == disagg-* ]]; then
-    CONFIG="{{CONFIG}}" DECODE_TP="$DECODE_TP" PREFILL_TP="$PREFILL_TP" python3 scripts/gen-nic-values.py
+    if [[ "{{FORCE_GPU_NIC_AFFINITY}}" == "yes" ]]; then
+      # if we have less than 8, make sure we reserve the numa node to have all the NICs available and let UCX pick the better
+      if [[ $DECODE_TP -lt 8 ]]; then
+        DECODE_TP_RESOURCES=4
+      fi
+      if [[ $PREFILL_TP -lt 8 ]]; then
+        PREFILL_TP_RESOURCES=4
+      fi
+    fi
+    CONFIG="{{CONFIG}}" DECODE_TP="$DECODE_TP_RESOURCES" PREFILL_TP="$PREFILL_TP_RESOURCES" python3 scripts/gen-nic-values.py
   fi
-  HELMFILE_CACHE_HOME="$HF_CACHE" MODEL="{{MODEL}}" MS_VALUES="$MS_VALUES" DECODE_TP="$DECODE_TP" PREFILL_TP="$PREFILL_TP" CONFIG="{{CONFIG}}" helmfile apply -n "$NS"
+  HELMFILE_CACHE_HOME="$HF_CACHE" MODEL="{{MODEL}}" MS_VALUES="$MS_VALUES" DECODE_TP="$DECODE_TP" PREFILL_TP="$PREFILL_TP" DECODE_TP_RESOURCES="$DECODE_TP_RESOURCES" PREFILL_TP_RESOURCES="$PREFILL_TP_RESOURCES" CONFIG="{{CONFIG}}" helmfile apply -n "$NS"
   kubectl -n "$NS" apply -f httproute.yaml
 
 # Wait for model server pods to be ready
@@ -376,6 +388,11 @@ sweep CONFIG:
     TARGET=agg
   fi
   echo "Launching sweep job for {{CONFIG}} in namespace $NS"
+  DECODE_TP=$(python3 -c "import yaml; d=yaml.safe_load(open('../pareto/configs/{{CONFIG}}.yaml')); print(d.get('decode',{}).get('parallelism',{}).get('tensor',8))")
+  PREFILL_TP=$(python3 -c "import yaml; d=yaml.safe_load(open('../pareto/configs/{{CONFIG}}.yaml')); print(d.get('prefill',{}).get('parallelism',{}).get('tensor',4))")
+  DECODE_REPLICAS=$(python3 -c "import yaml; d=yaml.safe_load(open('../pareto/configs/{{CONFIG}}.yaml')); print(d.get('decode',{}).get('replicas',1))")
+  PREFILL_REPLICAS=$(python3 -c "import yaml; d=yaml.safe_load(open('../pareto/configs/{{CONFIG}}.yaml')); print(d.get('prefill',{}).get('replicas',1))")
+  CALC_GPU_COUNT=$(( DECODE_TP * DECODE_REPLICAS + PREFILL_TP * PREFILL_REPLICAS))
   env \
     JOB_NAME="pareto-{{CONFIG}}" \
     CONFIG_NAME="{{CONFIG}}" \
@@ -386,9 +403,10 @@ sweep CONFIG:
     CONCURRENCY_LEVELS="{{CONCURRENCIES}}" \
     TARGET_DURATION={{TARGET_DURATION}} \
     MIN_PROMPTS={{MIN_PROMPTS}} \
+    ACTUAL_GPU_COUNT=$CALC_GPU_COUNT \
     SWEEP_TYPE={{SWEEP_TYPE}} \
     POKER_IMAGE="{{POKER_IMAGE}}" \
-    envsubst '${JOB_NAME} ${CONFIG_NAME} ${TARGET} ${NAMESPACE} ${ISL} ${OSL} ${CONCURRENCY_LEVELS} ${TARGET_DURATION} ${MIN_PROMPTS} ${SWEEP_TYPE} ${POKER_IMAGE}' \
+    envsubst '${JOB_NAME} ${CONFIG_NAME} ${TARGET} ${NAMESPACE} ${ISL} ${OSL} ${CONCURRENCY_LEVELS} ${TARGET_DURATION} ${MIN_PROMPTS} ${ACTUAL_GPU_COUNT} ${SWEEP_TYPE} ${POKER_IMAGE}' \
       < job.yaml | kubectl -n "$NS" replace --force -f -
 
 # Wait for a config's sweep job to complete
