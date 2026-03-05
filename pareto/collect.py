@@ -19,7 +19,7 @@ import sys
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-
+import os
 
 @dataclass
 class LatencyStats:
@@ -207,6 +207,26 @@ def collect_from_namespace(namespace: str) -> dict[str, str]:
             logs[job_name] = result.stdout
     return logs
 
+
+def save_logs_to_disk(all_logs: dict[str, str], output_dir: str):
+    """Saves the gathered log contents to local .log files."""
+    if not all_logs:
+        print("No logs found to save.")
+        return
+
+    # Create the directory if it doesn't exist
+    if not os.path.exists(output_dir):
+        os.makedirs(output_dir)
+        print(f"Created directory: {output_dir}")
+
+    for filename, content in all_logs.items():
+        # Ensure filename is safe and construct full path
+        safe_filename = os.path.basename(filename)
+        file_path = os.path.join(output_dir, safe_filename)
+
+        with open(file_path, "w", encoding="utf-8") as f:
+            f.write(content)
+        print(f"  Saved: {file_path}")
 
 def _fmt_ms(v: float):
     """Format a millisecond value for display (round to 1 decimal)."""
@@ -564,6 +584,9 @@ def main():
             results_by_target[target] = results
             configs[target] = config
             print(f"      {len(results)} result(s), gpu_count={config.get('gpu_count', '?')}")
+
+        print(f"Saving {len(all_logs)} log files to '{args.output_dir}'...")
+        save_logs_to_disk(all_logs, args.output_dir)
 
     if not results_by_target:
         print("\nNo benchmark results parsed from logs", file=sys.stderr)

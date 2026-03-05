@@ -48,6 +48,7 @@ spec:
               CONCURRENCY_LEVELS="${CONCURRENCY_LEVELS}"
               TARGET_DURATION=${TARGET_DURATION}
               MIN_PROMPTS=${MIN_PROMPTS}
+              ACTUAL_GPU_COUNT=${ACTUAL_GPU_COUNT}
 
               # Build gateway URL
               URL="http://infra-${TARGET}-inference-gateway-istio.${NAMESPACE}.svc.cluster.local"
@@ -76,12 +77,16 @@ spec:
               echo "Model: $MODEL"
 
               # Detect GPU count
-              GPU_COUNT=$(kubectl get pods -n "$NAMESPACE" \
-                -l "llm-d.ai/guide=${TARGET},llm-d.ai/inference-serving=true" \
-                -o json | jq '[.items[].spec.containers[].resources.limits | (.["nvidia.com/gpu"] // .["amd.com/gpu"] // empty) | tonumber] | add')
-              if [ -z "$GPU_COUNT" ] || [ "$GPU_COUNT" = "null" ]; then
-                echo "WARNING: Could not detect GPU count for $CONFIG_NAME, defaulting to 0"
-                GPU_COUNT=0
+              if [[ ${ACTUAL_GPU_COUNT} == 0 ]]; then
+                GPU_COUNT=$(kubectl get pods -n "$NAMESPACE" \
+                  -l "llm-d.ai/guide=${TARGET},llm-d.ai/inference-serving=true" \
+                  -o json | jq '[.items[].spec.containers[].resources.limits | (.["nvidia.com/gpu"] // .["amd.com/gpu"] // empty) | tonumber] | add')
+                if [ -z "$GPU_COUNT" ] || [ "$GPU_COUNT" = "null" ]; then
+                  echo "WARNING: Could not detect GPU count for $CONFIG_NAME, defaulting to 0"
+                  GPU_COUNT=0
+                fi
+              else
+                GPU_COUNT=${ACTUAL_GPU_COUNT}
               fi
               echo "GPU count: $GPU_COUNT"
 

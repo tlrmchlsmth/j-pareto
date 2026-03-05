@@ -34,11 +34,12 @@ BASE_JUSTFILE := "./Justfile"
 # Avoid users overlapping
 export NSP := env("NSP", env("USER", "anon"))
 
-
 # Run args
 IMAGE := "ghcr.io/vcave/llm-d/llm-d-rocm:vllm_700_qk_triton_aiter_uni_attn_fix_23c8e6822"
-EXTRA_ARGS := "--attention-backend ROCM_AITER_UNIFIED_ATTN"
-VLLM_ROCM_USE_AITER := "0"
+EXTRA_ARGS := env("EXTRA_ARGS", "")
+VLLM_ROCM_USE_AITER := env("VLLM_ROCM_USE_AITER", "1")
+VLLM_ROCM_QUICK_REDUCE_QUANTIZATION := env("VLLM_ROCM_QUICK_REDUCE_QUANTIZATION", "INT4")
+VLLM_ATTN_ARG := env("VLLM_ATTN_ARG", "ROCM_AITER_UNIFIED_ATTN")
 
 LLAMA_CONFIGS := env("CONFIGS", "agg-tp1 agg-tp2 agg-tp4 agg-tp8 disagg-1p-tp1-1d-tp2 disagg-2p-tp1-1d-tp2 disagg-3p-tp1-1d-tp2")
 GPTOSS_CONFIGS := env("CONFIGS", "agg-tp1 agg-tp2 agg-tp4 agg-tp8 disagg-1p-tp1-1d-tp2 disagg-2p-tp1-1d-tp2 disagg-3p-tp1-1d-tp2")
@@ -71,6 +72,8 @@ _run_base_cmd BASE_CMD MODEL SWEEP_TYPE CONFIGS:
     IMAGE="{{IMAGE}}"                               \
     EXTRA_ARGS="{{EXTRA_ARGS}}"                     \
     VLLM_ROCM_USE_AITER="{{VLLM_ROCM_USE_AITER}}"   \
+    VLLM_ROCM_QUICK_REDUCE_QUANTIZATION="{{VLLM_ROCM_QUICK_REDUCE_QUANTIZATION}}"   \
+    VLLM_ATTN_ARG="{{VLLM_ATTN_ARG}}"               \
     SWEEP_TYPE={{SWEEP_TYPE}}                       \
     just -f {{BASE_JUSTFILE}} {{BASE_CMD}}
 
