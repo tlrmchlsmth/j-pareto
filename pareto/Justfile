@@ -15,12 +15,13 @@ export MAX_GPUS := env("MAX_GPUS", "32")
 # Model to deploy
 export MODEL := env("MODEL", "openai/gpt-oss-120b")
 # vllm image to use
-export IMAGE := env("IMAGE", "ghcr.io/vcave/llm-d/llm-d-rocm:v0.4.7-debug")
+export IMAGE := env("IMAGE", "ghcr.io/vcave/llm-d/llm-d-rocm:vllm_700_qk_triton_aiter_uni_attn_fix_23c8e6822")
 
 # Sweep configuration
 export ISL := env("ISL", "4096")
 export OSL := env("OSL", "256")
 export CONCURRENCIES := env("CONCURRENCIES", "4 8 12 16 20 24 28 32 40 48 56 64 80 96 112 128 192 256 384 512")
+
 export TARGET_DURATION := env("TARGET_DURATION", "60")
 export MIN_PROMPTS := env("MIN_PROMPTS", "200")
 export POKER_IMAGE := env("POKER_IMAGE", "quay.io/tms/poker:0.0.13")
@@ -28,8 +29,10 @@ export POKER_IMAGE := env("POKER_IMAGE", "quay.io/tms/poker:0.0.13")
 # Extra vLLM args to inject into all model server containers (space-separated)
 export EXTRA_ARGS := env("EXTRA_ARGS", "")
 # Use aiter env
-export VLLM_ROCM_USE_AITER := env("VLLM_ROCM_USE_AITER", "")
-export VLLM_ROCM_QUICK_REDUCE_QUANTIZATION_VALS := env("VLLM_ROCM_QUICK_REDUCE_QUANTIZATION_VALS", "")
+export VLLM_ROCM_USE_AITER := env("VLLM_ROCM_USE_AITER", "1")
+export VLLM_ROCM_QUICK_REDUCE_QUANTIZATION := env("VLLM_ROCM_QUICK_REDUCE_QUANTIZATION", "INT4")
+# Injected as an `extra_args` into vLLM command line
+export VLLM_ATTN_ARG := env("VLLM_ATTN_ARG", "ROCM_AITER_UNIFIED_ATTN")
 
 # Sweep type can be eval or bench
 export SWEEP_TYPE := env("SWEEP_TYPE", "bench")
@@ -261,10 +264,11 @@ deploy CONFIG:
       overlay = yaml.safe_load(f)
   overlay.pop('expert_parallel', None)
   extra_args = shlex.split('{{EXTRA_ARGS}}')
+  extra_args.extend(['--attention-backend', '{{VLLM_ATTN_ARG}}'])
   ep = '$IS_EP' == 'yes'
   image_override = '{{IMAGE}}'
   aiter_override = '{{VLLM_ROCM_USE_AITER}}'
-  quant_override = '{{VLLM_ROCM_QUICK_REDUCE_QUANTIZATION_VALS}}'
+  quant_override = '{{VLLM_ROCM_QUICK_REDUCE_QUANTIZATION}}'
 
   if ep or extra_args or image_override or aiter_override or quant_override:
       with open('ms/values.yaml') as f:
@@ -298,18 +302,18 @@ deploy CONFIG:
                       env_vars.append({'name': 'VLLM_ROCM_USE_AITER', 'value': str(aiter_override)})
                   containers[0]['env'] = env_vars
 
-              # 4. Inject QUANT Env Var VLLM_ROCM_QUICK_REDUCE_QUANTIZATION_VALS
+              # 4. Inject QUANT Env Var VLLM_ROCM_QUICK_REDUCE_QUANTIZATION
               if quant_override:
                   env_vars = containers[0].get('env', [])
                   found = False
                   for env in env_vars:
-                      if env.get('name') == 'VLLM_ROCM_QUICK_REDUCE_QUANTIZATION_VALS':
+                      if env.get('name') == 'VLLM_ROCM_QUICK_REDUCE_QUANTIZATION':
                           env['value'] = str(quant_override)
                           found = True
                           break
                   # If it wasn't in the base values file, append it cleanly
                   if not found:
-                      env_vars.append({'name': 'VLLM_ROCM_QUICK_REDUCE_QUANTIZATION_VALS', 'value': str(quant_override)})
+                      env_vars.append({'name': 'VLLM_ROCM_QUICK_REDUCE_QUANTIZATION', 'value': str(quant_override)})
                   containers[0]['env'] = env_vars
 
               overlay.setdefault(role, {})['containers'] = containers
@@ -416,7 +420,7 @@ collect-sheets TITLE="":
   set -euo pipefail
   TITLE="{{TITLE}}"
   if [[ -z "$TITLE" ]]; then
-    TITLE="$(basename '{{MODEL}}') Pareto Sweep {{IMAGE}} {{EXTRA_ARGS}} VLLM_ROCM_USE_AITER={{VLLM_ROCM_USE_AITER}}"
+    TITLE="$(basename '{{MODEL}}') Pareto Sweep {{IMAGE}} {{EXTRA_ARGS}} VLLM_ROCM_USE_AITER={{VLLM_ROCM_USE_AITER}} VLLM_ROCM_QUICK_REDUCE_QUANTIZATION={{VLLM_ROCM_QUICK_REDUCE_QUANTIZATION}} VLLM_ATTN_ARG={{VLLM_ATTN_ARG}}"
   fi
   NAMESPACES=""
   for CFG in {{CONFIGS}}; do
