@@ -12,18 +12,9 @@ TARGET_DURATION := "60"
 MIN_PROMPTS := "200"
 HF_CACHE := "/mnt/nvme/models"
 PRIORITY_CLASS := "low-priority"
-EXTRA_VLLM_ARGS := env("EXTRA_VLLM_ARGS", "")
+EXTRA_VLLM_ARGS := env("EXTRA_VLLM_ARGS", "--attention-backend ROCM_AITER_UNIFIED_ATTN")
 VLLM_ROCM_USE_AITER := env("VLLM_ROCM_USE_AITER", "1")
 VLLM_ROCM_QUICK_REDUCE_QUANTIZATION := env("VLLM_ROCM_QUICK_REDUCE_QUANTIZATION", "INT4")
-# Set value to override attention backend ('ROCM_AITER_UNIFIED_ATTN', 'TRITON_ATTN', etc...)
-VLLM_ATTN_ARG := env("VLLM_ATTN_ARG", "")
-
-_BASE_EXTRA := env("EXTRA_VLLM_ARGS", "")
-EXTRA_VLLM_ARGS := if VLLM_ATTN_ARG != "" {
-    _BASE_EXTRA + " --attention-backend " + VLLM_ATTN_ARG
-} else {
-    _BASE_EXTRA
-}
 
 # EP/DP sweep configuration
 ENABLE_EP := "false"   # Enable --enable-expert-parallel (used by bench, always on for bench-ep/bench-dp)
@@ -202,7 +193,7 @@ collect:
 
 # Collect results and upload to Google Sheets with Pareto charts
 collect-sheets TITLE="PD Config ":
-  python3 collect.py -n {{NAMESPACE}} --sheets "{{TITLE}} {{MODEL}} {{IMAGE}} {{EXTRA_VLLM_ARGS}} VLLM_ROCM_USE_AITER={{VLLM_ROCM_USE_AITER}} VLLM_ROCM_QUICK_REDUCE_QUANTIZATION={{VLLM_ROCM_QUICK_REDUCE_QUANTIZATION}} VLLM_ATTN_ARG={{VLLM_ATTN_ARG}}"
+  python3 collect.py -n {{NAMESPACE}} --sheets "{{TITLE}} {{MODEL}} {{IMAGE}} {{EXTRA_VLLM_ARGS}} VLLM_ROCM_USE_AITER={{VLLM_ROCM_USE_AITER}} VLLM_ROCM_QUICK_REDUCE_QUANTIZATION={{VLLM_ROCM_QUICK_REDUCE_QUANTIZATION}} "
 
 # Show status of benchmark Jobs and Pods
 status:

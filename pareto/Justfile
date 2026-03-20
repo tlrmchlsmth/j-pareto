@@ -30,10 +30,8 @@ export FORCE_GPU_NIC_AFFINITY := env("FORCE_GPU_NIC_AFFINITY", "yes")
 # Extra vLLM args to inject into all model server containers (space-separated)
 export EXTRA_ARGS := env("EXTRA_ARGS", "")
 # Use aiter env
-export VLLM_ROCM_USE_AITER := env("VLLM_ROCM_USE_AITER", "1")
-export VLLM_ROCM_QUICK_REDUCE_QUANTIZATION := env("VLLM_ROCM_QUICK_REDUCE_QUANTIZATION", "INT4")
-# Injected as an `extra_args` into vLLM command line
-export VLLM_ATTN_ARG := env("VLLM_ATTN_ARG", "ROCM_AITER_UNIFIED_ATTN")
+export VLLM_ROCM_USE_AITER := env("VLLM_ROCM_USE_AITER", "")
+export VLLM_ROCM_QUICK_REDUCE_QUANTIZATION := env("VLLM_ROCM_QUICK_REDUCE_QUANTIZATION", "")
 
 # Sweep type can be eval or bench
 export SWEEP_TYPE := env("SWEEP_TYPE", "bench")
@@ -265,7 +263,6 @@ deploy CONFIG:
       overlay = yaml.safe_load(f)
   overlay.pop('expert_parallel', None)
   extra_args = shlex.split('{{EXTRA_ARGS}}')
-  extra_args.extend(['--attention-backend', '{{VLLM_ATTN_ARG}}'])
   ep = '$IS_EP' == 'yes'
   image_override = '{{IMAGE}}'
   aiter_override = '{{VLLM_ROCM_USE_AITER}}'
@@ -438,7 +435,7 @@ collect-sheets TITLE="":
   set -euo pipefail
   TITLE="{{TITLE}}"
   if [[ -z "$TITLE" ]]; then
-    TITLE="$(basename '{{MODEL}}') Pareto Sweep {{IMAGE}} {{EXTRA_ARGS}} VLLM_ROCM_USE_AITER={{VLLM_ROCM_USE_AITER}} VLLM_ROCM_QUICK_REDUCE_QUANTIZATION={{VLLM_ROCM_QUICK_REDUCE_QUANTIZATION}} VLLM_ATTN_ARG={{VLLM_ATTN_ARG}}"
+    TITLE="$(basename '{{MODEL}}') Pareto Sweep {{IMAGE}} {{EXTRA_ARGS}} VLLM_ROCM_USE_AITER={{VLLM_ROCM_USE_AITER}} VLLM_ROCM_QUICK_REDUCE_QUANTIZATION={{VLLM_ROCM_QUICK_REDUCE_QUANTIZATION}} "
   fi
   NAMESPACES=""
   for CFG in {{CONFIGS}}; do
