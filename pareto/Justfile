@@ -28,10 +28,10 @@ export POKER_IMAGE := env("POKER_IMAGE", "quay.io/tms/poker:0.0.13")
 export FORCE_GPU_NIC_AFFINITY := env("FORCE_GPU_NIC_AFFINITY", "yes")
 
 # Extra vLLM args to inject into all model server containers (space-separated)
-export EXTRA_ARGS := env("EXTRA_ARGS", "")
+export EXTRA_ARGS := env("EXTRA_ARGS", "--attention-backend ROCM_AITER_UNIFIED_ATTN")
 # Use aiter env
-export VLLM_ROCM_USE_AITER := env("VLLM_ROCM_USE_AITER", "")
-export VLLM_ROCM_QUICK_REDUCE_QUANTIZATION := env("VLLM_ROCM_QUICK_REDUCE_QUANTIZATION", "")
+export VLLM_ROCM_USE_AITER := env("VLLM_ROCM_USE_AITER", "1")
+export VLLM_ROCM_QUICK_REDUCE_QUANTIZATION := env("VLLM_ROCM_QUICK_REDUCE_QUANTIZATION", "INT4")
 
 # Sweep type can be eval or bench
 export SWEEP_TYPE := env("SWEEP_TYPE", "bench")

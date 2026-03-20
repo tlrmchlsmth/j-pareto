@@ -45,7 +45,6 @@ CONFIGS := env("CONFIGS", "agg-tp1 agg-tp2 agg-tp4 agg-tp8 disagg-1p-tp1-1d-tp2 
 THIS_JUSTFILE:="./Justfile.repro"
 
 _run_base_cmd BASE_CMD MODEL SWEEP_TYPE CONFIGS:  
-
     NSP={{NSP}}                                     \
     CONFIGS="{{CONFIGS}}"                           \
     MODEL="{{MODEL}}"                               \
@@ -59,24 +58,24 @@ _run_base_cmd BASE_CMD MODEL SWEEP_TYPE CONFIGS:
 run MODEL:
     #!/usr/bin/env bash
     set -euo pipefail
-    just  -f "{{THIS_JUSTFILE}}" _run_base_cmd run-all {{MODEL}} bench {{CONFIGS}}
+    just  -f "{{THIS_JUSTFILE}}" _run_base_cmd run-all {{MODEL}} bench "{{CONFIGS}}"
 
 eval MODEL:
     #!/usr/bin/env bash
     set -euo pipefail
-    just  -f "{{THIS_JUSTFILE}}" _run_base_cmd run-all {{MODEL}} eval {{CONFIGS}}
+    just  -f "{{THIS_JUSTFILE}}" _run_base_cmd run-all {{MODEL}} eval "{{CONFIGS}}"
 
 collect MODEL:
     #!/usr/bin/env bash
     set -euo pipefail
-    just  -f "{{THIS_JUSTFILE}}" _run_base_cmd collect {{MODEL}} eval {{CONFIGS}}
+    just  -f "{{THIS_JUSTFILE}}" _run_base_cmd collect {{MODEL}} eval "{{CONFIGS}}"
 
 collect-sheets MODEL:
     #!/usr/bin/env bash
     set -euo pipefail
-    just  -f "{{THIS_JUSTFILE}}" _run_base_cmd collect-sheets {{MODEL}} eval {{CONFIGS}}
+    just  -f "{{THIS_JUSTFILE}}" _run_base_cmd collect-sheets {{MODEL}} eval "{{CONFIGS}}"
 
 destroy MODEL:
     #!/usr/bin/env bash
     set -euo pipefail
-    just  -f "{{THIS_JUSTFILE}}" _run_base_cmd destroy-all {{MODEL}} eval {{CONFIGS}}
+    just  -f "{{THIS_JUSTFILE}}" _run_base_cmd destroy-all {{MODEL}} eval "{{CONFIGS}}"
