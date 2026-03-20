@@ -36,7 +36,7 @@ export NSP := env("NSP", env("USER", "anon"))
 
 # Run args
 IMAGE := "ghcr.io/vcave/llm-d/llm-d-rocm:vllm_700_qk_triton_aiter_uni_attn_fix_23c8e6822"
-EXTRA_ARGS := "--attention-backend ROCM_AITER_UNIFIED_ATTN"
+EXTRA_ARGS := env("EXTRA_ARGS", "--attention-backend ROCM_AITER_UNIFIED_ATTN")
 VLLM_ROCM_USE_AITER := env("VLLM_ROCM_USE_AITER", "1")
 VLLM_ROCM_QUICK_REDUCE_QUANTIZATION := env("VLLM_ROCM_QUICK_REDUCE_QUANTIZATION", "INT4")
 
