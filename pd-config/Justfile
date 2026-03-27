@@ -6,14 +6,15 @@ KN := "kubectl -n " + NAMESPACE
 
 # Benchmark configuration
 MODEL := env("MODEL", "openai/gpt-oss-120b")
-IMAGE := env("IMAGE", "ghcr.io/vcave/llm-d/llm-d-rocm:v0.4.7-debug")
+IMAGE := env("IMAGE", "ghcr.io/vcave/llm-d/llm-d-rocm:vllm_700_qk_triton_aiter_uni_attn_fix_23c8e6822")
 GPU_MEM_UTIL := "0.95"
 TARGET_DURATION := "60"
 MIN_PROMPTS := "200"
 HF_CACHE := "/mnt/nvme/models"
 PRIORITY_CLASS := "low-priority"
-EXTRA_VLLM_ARGS := env("EXTRA_VLLM_ARGS", "")
+EXTRA_VLLM_ARGS := env("EXTRA_VLLM_ARGS", "--attention-backend ROCM_AITER_UNIFIED_ATTN")
 VLLM_ROCM_USE_AITER := env("VLLM_ROCM_USE_AITER", "1")
+VLLM_ROCM_QUICK_REDUCE_QUANTIZATION := env("VLLM_ROCM_QUICK_REDUCE_QUANTIZATION", "INT4")
 
 # EP/DP sweep configuration
 ENABLE_EP := "false"   # Enable --enable-expert-parallel (used by bench, always on for bench-ep/bench-dp)
@@ -79,7 +80,8 @@ _job-yaml JOB_NAME GPU_COUNT TP DP ENABLE_EP WORKLOAD_TYPE ISL OSL CONCURRENCY_L
     MULTUS_NETWORKS="$MULTUS_NETWORKS" \
     EXTRA_VLLM_ARGS="{{EXTRA_VLLM_ARGS}}" \
     VLLM_ROCM_USE_AITER="{{VLLM_ROCM_USE_AITER}}" \
-    envsubst '${JOB_NAME} ${GPU_COUNT} ${TP} ${DP} ${ENABLE_EP} ${MODEL} ${VLLM_IMAGE} ${WORKLOAD_TYPE} ${ISL} ${OSL} ${CONCURRENCY_LEVELS} ${TARGET_DURATION} ${MIN_PROMPTS} ${GPU_MEM_UTIL} ${HF_CACHE_HOST_PATH} ${PRIORITY_CLASS} ${MULTUS_NETWORKS} ${EXTRA_VLLM_ARGS} ${VLLM_ROCM_USE_AITER}' \
+    VLLM_ROCM_QUICK_REDUCE_QUANTIZATION="{{VLLM_ROCM_QUICK_REDUCE_QUANTIZATION}}" \
+    envsubst '${JOB_NAME} ${GPU_COUNT} ${TP} ${DP} ${ENABLE_EP} ${MODEL} ${VLLM_IMAGE} ${WORKLOAD_TYPE} ${ISL} ${OSL} ${CONCURRENCY_LEVELS} ${TARGET_DURATION} ${MIN_PROMPTS} ${GPU_MEM_UTIL} ${HF_CACHE_HOST_PATH} ${PRIORITY_CLASS} ${MULTUS_NETWORKS} ${EXTRA_VLLM_ARGS} ${VLLM_ROCM_USE_AITER} ${VLLM_ROCM_QUICK_REDUCE_QUANTIZATION}' \
       < job.yaml
 
 # Launch a single benchmark Job
@@ -191,7 +193,7 @@ collect:
 
 # Collect results and upload to Google Sheets with Pareto charts
 collect-sheets TITLE="PD Config ":
-  python3 collect.py -n {{NAMESPACE}} --sheets "{{TITLE}} {{MODEL}} {{IMAGE}} {{EXTRA_VLLM_ARGS}} VLLM_ROCM_USE_AITER={{VLLM_ROCM_USE_AITER}}"
+  python3 collect.py -n {{NAMESPACE}} --sheets "{{TITLE}} {{MODEL}} {{IMAGE}} {{EXTRA_VLLM_ARGS}} VLLM_ROCM_USE_AITER={{VLLM_ROCM_USE_AITER}} VLLM_ROCM_QUICK_REDUCE_QUANTIZATION={{VLLM_ROCM_QUICK_REDUCE_QUANTIZATION}} "
 
 # Show status of benchmark Jobs and Pods
 status:

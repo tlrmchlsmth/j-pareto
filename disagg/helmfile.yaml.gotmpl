@@ -16,6 +16,8 @@ environments:
 {{- $msValues := env "MS_VALUES" -}}
 {{- $decodeTp := env "DECODE_TP" | default "" -}}
 {{- $prefillTp := env "PREFILL_TP" | default "" -}}
+{{- $decodeTpResources := env "DECODE_TP_RESOURCES" | default "" -}}
+{{- $prefillTpResources := env "PREFILL_TP_RESOURCES" | default "" -}}
 {{- $config := env "CONFIG" | default "default" -}}
 
 repositories:
@@ -92,15 +94,23 @@ releases:
       - name: decode.parallelism.tensor
         value: {{ $decodeTp | quote }}
       - name: decode.containers[0].resources.limits.nvidia\.com/sriov-rdma-vf
-        value: {{ $decodeTp | quote }}
+        value: {{ $decodeTpResources | quote }}
       - name: decode.containers[0].resources.requests.nvidia\.com/sriov-rdma-vf
-        value: {{ $decodeTp | quote }}
+        value: {{ $decodeTpResources | quote }}
+      - name: decode.containers[0].resources.limits.amd\.com/gpu
+        value: {{ $decodeTpResources | quote }}
+      - name: decode.containers[0].resources.requests.amd\.com/gpu
+        value: {{ $decodeTpResources | quote }}
       - name: prefill.parallelism.tensor
         value: {{ $prefillTp | quote }}
       - name: prefill.containers[0].resources.limits.nvidia\.com/sriov-rdma-vf
-        value: {{ $prefillTp | quote }}
+        value: {{ $prefillTpResources | quote }}
       - name: prefill.containers[0].resources.requests.nvidia\.com/sriov-rdma-vf
-        value: {{ $prefillTp | quote }}
+        value: {{ $prefillTpResources | quote }}
+      - name: prefill.containers[0].resources.limits.amd\.com/gpu
+        value: {{ $prefillTpResources | quote }}
+      - name: prefill.containers[0].resources.requests.amd\.com/gpu
+        value: {{ $prefillTpResources | quote }}
     {{- end }}
     labels:
       kind: inference-stack
